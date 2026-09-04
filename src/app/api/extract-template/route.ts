@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { getAIConfig } from "@/lib/ai/config";
 import { LLMError } from "@/lib/ai/client";
 import { extractTemplateServer } from "@/services/ai/resumeAgent.server";
 
@@ -10,7 +11,8 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "缺少必要参考内容" }, { status: 400 });
     }
 
-    const { html, mode } = await extractTemplateServer(content);
+    const config = getAIConfig(request);
+    const { html, mode } = await extractTemplateServer(content, config);
     return NextResponse.json({ html, mode });
   } catch (error) {
     const message =

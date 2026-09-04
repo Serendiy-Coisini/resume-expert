@@ -9,7 +9,33 @@ export interface AIConfig {
   provider: string;
 }
 
-export function getAIConfig(): AIConfig {
+export function getAIConfig(req?: Request): AIConfig {
+  if (req) {
+    const rawHeader = req.headers.get("x-llm-config");
+    if (rawHeader) {
+      try {
+        const parsed = JSON.parse(decodeURIComponent(rawHeader));
+        if (parsed.apiKey && typeof parsed.apiKey === "string" && parsed.apiKey.trim()) {
+          const apiKey = parsed.apiKey.trim();
+          const baseUrl = (parsed.baseUrl?.trim() || "https://api.openai.com/v1").replace(/\/$/, "");
+          const model = parsed.model?.trim() || "deepseek-chat";
+          const visionModel = parsed.visionModel?.trim() || parsed.model?.trim() || model;
+          const provider = parsed.provider?.trim() || parsed.providerId?.trim() || "openai-compatible";
+          return {
+            mode: "llm",
+            apiKey,
+            baseUrl,
+            model,
+            visionModel,
+            provider,
+          };
+        }
+      } catch (err) {
+        console.warn("[getAIConfig] Failed to parse x-llm-config header:", err);
+      }
+    }
+  }
+
   const apiKey = process.env.LLM_API_KEY?.trim() ?? "";
   const forceMock = process.env.USE_MOCK_AI === "true";
   const mode: AIMode = !forceMock && apiKey ? "llm" : "mock";

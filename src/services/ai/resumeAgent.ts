@@ -6,6 +6,7 @@ import type {
 } from "@/lib/ai/types";
 import type { AnalysisResult, OptimizeStyle, UserInput } from "@/types/resume";
 import { anonymizeUserInput, restoreAnalysisResult } from "@/lib/privacy/pii";
+import { getAIHeaders, getUserAIConfig } from "@/store/ai-config-store";
 
 export { STYLE_LABELS } from "@/lib/ai/types";
 
@@ -18,12 +19,16 @@ class ResumeAgentClientError extends Error {
 
 async function postJSON<T>(url: string, body: unknown, signal?: AbortSignal): Promise<T> {
   const effectiveSignal = signal ?? AbortSignal.timeout(60_000);
+  const aiHeaders = getAIHeaders();
 
   let response: Response;
   try {
     response = await fetch(url, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        ...aiHeaders,
+      },
       body: JSON.stringify(body),
       signal: effectiveSignal,
     });
@@ -50,6 +55,15 @@ async function postJSON<T>(url: string, body: unknown, signal?: AbortSignal): Pr
 }
 
 export async function fetchAIStatus() {
+  const userConfig = getUserAIConfig();
+  if (userConfig?.apiKey) {
+    return {
+      mode: "llm" as const,
+      model: userConfig.model || "deepseek-chat",
+      provider: userConfig.providerId || "custom",
+    };
+  }
+
   const response = await fetch("/api/ai/status", { cache: "no-store" });
   if (!response.ok) {
     return { mode: "mock" as const };
@@ -94,12 +108,16 @@ export async function runResumeAnalysisStream(
   }
 
   const effectiveSignal = signal ?? AbortSignal.timeout(90_000);
+  const aiHeaders = getAIHeaders();
 
   let response: Response;
   try {
     response = await fetch("/api/analyze/stream", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        ...aiHeaders,
+      },
       body: JSON.stringify({ input: inputToSend, optimizeStyle }),
       signal: effectiveSignal,
     });

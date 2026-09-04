@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { getAIConfig } from "@/lib/ai/config";
 import { LLMError } from "@/lib/ai/client";
 import type { ApplyFollowUpRequestBody } from "@/lib/ai/types";
 import { reoptimizeWithBulletsServer } from "@/services/ai/resumeAgent.server";
@@ -12,10 +13,12 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "缺少必要参数" }, { status: 400 });
     }
 
+    const config = getAIConfig(request);
     const { optimizedItems, finalResume, mode } = await reoptimizeWithBulletsServer(
       input,
       style,
-      bullets
+      bullets,
+      config
     );
     return NextResponse.json({ optimizedItems, finalResume, mode });
   } catch (error) {

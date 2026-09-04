@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { chatCompletionJSON } from "@/lib/ai/client";
+import type { AIConfig } from "@/lib/ai/config";
 import {
   RESUME_AGENT_SYSTEM_PROMPT,
   buildAnalyzeCorePrompt,
@@ -48,9 +49,10 @@ function buildCoreSummary(parts: DiagnosisMatchResult): string {
 
 export async function runLLMResumeAnalysis(
   input: UserInput,
-  optimizeStyle: OptimizeStyle = "ai-product"
+  optimizeStyle: OptimizeStyle = "ai-product",
+  config?: AIConfig
 ): Promise<AnalysisResult> {
-  return runLLMResumeAnalysisStream(input, optimizeStyle);
+  return runLLMResumeAnalysisStream(input, optimizeStyle, undefined, config);
 }
 
 export type StageName = "jd-analysis" | "diagnosis" | "optimize" | "interview";
@@ -64,7 +66,8 @@ export interface StageUpdatePayload {
 export async function runLLMResumeAnalysisStream(
   input: UserInput,
   optimizeStyle: OptimizeStyle = "ai-product",
-  onStageUpdate?: (payload: StageUpdatePayload) => void
+  onStageUpdate?: (payload: StageUpdatePayload) => void,
+  config?: AIConfig
 ): Promise<AnalysisResult> {
   onStageUpdate?.({ stage: "jd-analysis", status: "start" });
   const jd = await chatCompletionJSON<JDAnalysisResult>({
@@ -72,7 +75,7 @@ export async function runLLMResumeAnalysisStream(
     user: buildAnalyzeCorePrompt(input),
     maxTokens: 3000,
     schema: jdAnalysisResponseSchema,
-  });
+  }, config);
   onStageUpdate?.({
     stage: "jd-analysis",
     status: "complete",
@@ -85,7 +88,7 @@ export async function runLLMResumeAnalysisStream(
     user: buildAnalyzeDiagnosisPrompt(input),
     maxTokens: 4000,
     schema: diagnosisMatchResponseSchema,
-  });
+  }, config);
 
   const normalizedFollowUpQuestions = normalizeFollowUpQuestions(diagnosisMatch.followUpQuestions);
 
@@ -107,7 +110,7 @@ export async function runLLMResumeAnalysisStream(
     user: buildAnalyzeOutputPrompt(input, optimizeStyle, coreSummary),
     maxTokens: 4500,
     schema: optimizeResumeResponseSchema,
-  });
+  }, config);
 
   onStageUpdate?.({ stage: "interview", status: "start" });
   const interviewPromise = chatCompletionJSON<InterviewResult>({
@@ -115,7 +118,7 @@ export async function runLLMResumeAnalysisStream(
     user: buildAnalyzeInterviewPrompt(input, coreSummary),
     maxTokens: 3500,
     schema: interviewResponseSchema,
-  });
+  }, config);
 
   const [optimizeResume, interview] = await Promise.all([optimizeResumePromise, interviewPromise]);
 
@@ -152,7 +155,8 @@ export async function runLLMResumeAnalysisStream(
 
 export async function runLLMRegenerateOptimizedItems(
   input: UserInput,
-  style: OptimizeStyle
+  style: OptimizeStyle,
+  config?: AIConfig
 ): Promise<{ optimizedItems: AnalysisResult["optimizedItems"] }> {
   const raw = await chatCompletionJSON<{ optimizedItems: AnalysisResult["optimizedItems"] }>({
     system: RESUME_AGENT_SYSTEM_PROMPT,
@@ -160,7 +164,7 @@ export async function runLLMRegenerateOptimizedItems(
     temperature: 0.5,
     maxTokens: 4000,
     schema: optimizedItemsResponseSchema,
-  });
+  }, config);
 
   return { optimizedItems: normalizeOptimizedItems(raw.optimizedItems) };
 }
@@ -169,7 +173,8 @@ export async function runLLMFollowUpBullet(
   input: UserInput,
   question: string,
   purpose: string,
-  userAnswer: string
+  userAnswer: string,
+  config?: AIConfig
 ): Promise<string> {
   const raw = await chatCompletionJSON<{ bullet: string }>({
     system: RESUME_AGENT_SYSTEM_PROMPT,
@@ -177,7 +182,7 @@ export async function runLLMFollowUpBullet(
     temperature: 0.3,
     maxTokens: 500,
     schema: bulletResponseSchema,
-  });
+  }, config);
 
   return raw.bullet?.trim() ?? "";
 }
@@ -188,14 +193,15 @@ export async function runLLMFollowUpBullet(
 export async function runLLMReoptimizeWithBullets(
   input: UserInput,
   style: OptimizeStyle,
-  bullets: FollowUpBulletEntry[]
+  bullets: FollowUpBulletEntry[],
+  config?: AIConfig
 ): Promise<Pick<AnalysisResult, "optimizedItems" | "finalResume">> {
   const raw = await chatCompletionJSON<OptimizeResumeResult>({
     system: RESUME_AGENT_SYSTEM_PROMPT,
     user: buildReoptimizeWithBulletsPrompt(input, style, bullets),
     maxTokens: 5000,
     schema: optimizeResumeResponseSchema,
-  });
+  }, config);
 
   return {
     optimizedItems: normalizeOptimizedItems(raw.optimizedItems),
@@ -203,14 +209,14 @@ export async function runLLMReoptimizeWithBullets(
   };
 }
 
-export async function runLLMExtractTemplate(rawContent: string): Promise<string> {
+export async function runLLMExtractTemplate(rawContent: string, config?: AIConfig): Promise<string> {
   const raw = await chatCompletionJSON<{ html: string }>({
     system: RESUME_AGENT_SYSTEM_PROMPT,
     user: buildExtractTemplatePrompt(rawContent),
     temperature: 0.4,
     maxTokens: 4000,
     schema: z.object({ html: z.string() }),
-  });
+  }, config);
 
   return raw.html?.trim() ?? "";
 }

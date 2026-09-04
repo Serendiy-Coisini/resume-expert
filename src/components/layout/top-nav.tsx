@@ -8,17 +8,25 @@ import { Button } from "@/components/ui/button";
 import { fetchAIStatus } from "@/services/ai/resumeAgent";
 import { HistoryDialog } from "@/components/layout/history-dialog";
 import { useResumeStore } from "@/store/resume-store";
+import { useAIConfigStore } from "@/store/ai-config-store";
 
 export function TopNav({ onMenuClick }: { onMenuClick?: () => void }) {
   const { aiMode, setAiMode, analysisResult, reset } = useResumeStore();
+  const { config: userAIConfig } = useAIConfigStore();
   const [mockReason, setMockReason] = useState<string | null>(null);
 
   useEffect(() => {
+    if (userAIConfig?.apiKey?.trim()) {
+      setAiMode("llm");
+      setMockReason(null);
+      return;
+    }
+
     fetchAIStatus()
       .then((status) => {
         setAiMode(status.mode);
         if (status.reason === "missing_api_key") {
-          setMockReason("未配置 LLM_API_KEY");
+          setMockReason("未配置 API Key");
         } else if (status.reason === "forced") {
           setMockReason("已强制 Mock");
         } else {
@@ -26,7 +34,7 @@ export function TopNav({ onMenuClick }: { onMenuClick?: () => void }) {
         }
       })
       .catch(() => setAiMode("mock"));
-  }, [setAiMode]);
+  }, [setAiMode, userAIConfig]);
 
   const handleReset = () => {
     if (window.confirm("确定要重新开始吗？当前所有输入和分析结果将被清除。")) {
@@ -64,7 +72,7 @@ export function TopNav({ onMenuClick }: { onMenuClick?: () => void }) {
         </span>
         {aiMode && (
           <Badge variant={aiMode === "llm" ? "success" : "secondary"} className="hidden font-normal sm:inline-flex">
-            {aiMode === "llm" ? "AI 模式" : mockReason ? `Mock · ${mockReason}` : "Mock 模式"}
+            {aiMode === "llm" ? (userAIConfig?.apiKey?.trim() ? "AI 模式 (本地Key)" : "AI 模式") : mockReason ? `Mock · ${mockReason}` : "Mock 模式"}
           </Badge>
         )}
       </div>

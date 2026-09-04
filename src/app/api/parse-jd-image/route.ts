@@ -26,7 +26,7 @@ export async function POST(request: Request) {
     const buffer = Buffer.from(arrayBuffer);
 
     if (isImage) {
-      const config = getAIConfig();
+      const config = getAIConfig(request);
       const mimeType = file.type || (fileName.endsWith(".png") ? "image/png" : "image/jpeg");
       const base64DataUrl = `data:${mimeType};base64,${buffer.toString("base64")}`;
 

@@ -1,4 +1,4 @@
-import { getAIConfig } from "@/lib/ai/config";
+import { getAIConfig, type AIConfig } from "@/lib/ai/config";
 import type { AIMode } from "@/lib/ai/types";
 import {
   runMockFollowUpBullet,
@@ -17,18 +17,19 @@ import {
 import type { FollowUpBulletEntry } from "@/lib/ai/prompts";
 import type { AnalysisResult, OptimizeStyle, UserInput } from "@/types/resume";
 
-function currentMode(): AIMode {
-  return getAIConfig().mode;
+function currentMode(config?: AIConfig): AIMode {
+  return config?.mode ?? getAIConfig().mode;
 }
 
 export async function analyzeResumeServer(
   input: UserInput,
-  optimizeStyle: OptimizeStyle = "ai-product"
+  optimizeStyle: OptimizeStyle = "ai-product",
+  config?: AIConfig
 ): Promise<{ result: AnalysisResult; mode: AIMode }> {
-  const mode = currentMode();
+  const mode = currentMode(config);
 
   if (mode === "llm") {
-    const result = await runLLMResumeAnalysis(input, optimizeStyle);
+    const result = await runLLMResumeAnalysis(input, optimizeStyle, config);
     return { result, mode };
   }
 
@@ -38,16 +39,17 @@ export async function analyzeResumeServer(
 
 export async function regenerateOptimizedItemsServer(
   input: UserInput,
-  style: OptimizeStyle
+  style: OptimizeStyle,
+  config?: AIConfig
 ): Promise<{
   optimizedItems: AnalysisResult["optimizedItems"];
   finalResume?: AnalysisResult["finalResume"];
   mode: AIMode;
 }> {
-  const mode = currentMode();
+  const mode = currentMode(config);
 
   if (mode === "llm") {
-    const { optimizedItems } = await runLLMRegenerateOptimizedItems(input, style);
+    const { optimizedItems } = await runLLMRegenerateOptimizedItems(input, style, config);
     return { optimizedItems, mode };
   }
 
@@ -59,12 +61,13 @@ export async function generateFollowUpBulletServer(
   input: UserInput,
   question: string,
   purpose: string,
-  userAnswer: string
+  userAnswer: string,
+  config?: AIConfig
 ): Promise<{ bullet: string; mode: AIMode }> {
-  const mode = currentMode();
+  const mode = currentMode(config);
 
   if (mode === "llm") {
-    const bullet = await runLLMFollowUpBullet(input, question, purpose, userAnswer);
+    const bullet = await runLLMFollowUpBullet(input, question, purpose, userAnswer, config);
     return { bullet, mode };
   }
 
@@ -75,12 +78,13 @@ export async function generateFollowUpBulletServer(
 export async function reoptimizeWithBulletsServer(
   input: UserInput,
   style: OptimizeStyle,
-  bullets: FollowUpBulletEntry[]
+  bullets: FollowUpBulletEntry[],
+  config?: AIConfig
 ): Promise<{ optimizedItems: AnalysisResult["optimizedItems"]; finalResume: AnalysisResult["finalResume"]; mode: AIMode }> {
-  const mode = currentMode();
+  const mode = currentMode(config);
 
   if (mode === "llm") {
-    const { optimizedItems, finalResume } = await runLLMReoptimizeWithBullets(input, style, bullets);
+    const { optimizedItems, finalResume } = await runLLMReoptimizeWithBullets(input, style, bullets, config);
     return { optimizedItems, finalResume, mode };
   }
 
@@ -88,11 +92,11 @@ export async function reoptimizeWithBulletsServer(
   return { optimizedItems, finalResume, mode };
 }
 
-export async function extractTemplateServer(rawContent: string): Promise<{ html: string; mode: AIMode }> {
-  const mode = currentMode();
+export async function extractTemplateServer(rawContent: string, config?: AIConfig): Promise<{ html: string; mode: AIMode }> {
+  const mode = currentMode(config);
 
   if (mode === "llm") {
-    const html = await runLLMExtractTemplate(rawContent);
+    const html = await runLLMExtractTemplate(rawContent, config);
     return { html, mode };
   }
 

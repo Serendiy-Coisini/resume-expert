@@ -1,52 +1,19 @@
 import { NextResponse } from "next/server";
 import { promises as fs } from "fs";
 import path from "path";
-import { getAIConfig } from "@/lib/ai/config";
 
 export const dynamic = "force-dynamic";
 
 export async function GET() {
   try {
-    const config = getAIConfig();
-    const envPath = path.join(process.cwd(), ".env.local");
-
-    const envVars: Record<string, string> = {};
-    try {
-      const content = await fs.readFile(envPath, "utf-8");
-      content.split("\n").forEach((line) => {
-        const match = line.match(/^([^=]+)=(.*)$/);
-        if (match) {
-          envVars[match[1].trim()] = match[2].trim();
-        }
-      });
-    } catch {
-      // file doesn't exist
-    }
-
-    const apiKey = envVars.LLM_API_KEY || config.apiKey || "";
-    const baseUrl = envVars.LLM_BASE_URL || config.baseUrl || "";
-    const model = envVars.LLM_MODEL || config.model || "";
-    
-    let providerId = envVars.LLM_PROVIDER_ID || "";
-    if (!providerId) {
-      if (baseUrl.includes("deepseek")) providerId = "deepseek";
-      else if (baseUrl.includes("siliconflow")) providerId = "siliconflow";
-      else if (baseUrl.includes("openai")) providerId = "openai";
-      else if (baseUrl.includes("moonshot")) providerId = "moonshot";
-      else if (apiKey) providerId = "custom";
-      else providerId = "deepseek";
-    }
-
+    const hasServerKey = Boolean(process.env.LLM_API_KEY?.trim());
     return NextResponse.json({
       success: true,
-      apiKey,
-      baseUrl,
-      model,
-      providerId,
+      hasServerConfig: hasServerKey,
     });
   } catch (error) {
     console.error("Get settings error:", error);
-    return NextResponse.json({ success: false, error: "Failed to load settings" }, { status: 500 });
+    return NextResponse.json({ success: false, error: "Failed to load settings status" }, { status: 500 });
   }
 }
 

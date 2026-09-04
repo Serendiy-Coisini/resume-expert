@@ -35,6 +35,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { SectionTitle } from "@/components/shared/ui-helpers";
 import { runResumeAnalysisStream } from "@/services/ai/resumeAgent";
 import { useResumeStore } from "@/store/resume-store";
+import { getAIHeaders } from "@/store/ai-config-store";
 import type { CompanyType, JobStage } from "@/types/resume";
 import { COMPANY_TYPE_OPTIONS, getCompanyTypeOption } from "@/lib/company-config";
 import { JOB_STAGE_OPTIONS, getJobStageOption } from "@/lib/job-stage-config";
@@ -109,6 +110,7 @@ export function InputStep() {
 
       const res = await fetch("/api/parse-jd-image", {
         method: "POST",
+        headers: getAIHeaders(),
         body: formData,
       });
 

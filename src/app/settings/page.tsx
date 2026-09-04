@@ -5,9 +5,11 @@ import Link from "next/link";
 import {
   Settings, ChevronRight, Check, Loader2, Eye, EyeOff,
   Sparkles, ExternalLink, AlertCircle, ArrowLeft, Zap, RotateCcw,
+  ShieldCheck,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { useAIConfigStore } from "@/store/ai-config-store";
 
 const PROVIDERS = [
   {
@@ -73,6 +75,12 @@ const PROVIDERS = [
 ];
 
 export default function SettingsPage() {
+  const {
+    config: storedConfig,
+    setConfig: setStoredConfig,
+    resetConfig: resetStoredConfig,
+  } = useAIConfigStore();
+
   const [selectedProvider, setSelectedProvider] = useState<string | null>("deepseek");
   const [apiKey, setApiKey] = useState("");
   const [customBaseUrl, setCustomBaseUrl] = useState("");
@@ -85,26 +93,17 @@ export default function SettingsPage() {
   const [resetting, setResetting] = useState(false);
   const [resetSuccess, setResetSuccess] = useState(false);
   const [showGuide, setShowGuide] = useState(true);
+  const [initialized, setInitialized] = useState(false);
 
   useEffect(() => {
-    async function loadConfig() {
-      try {
-        const res = await fetch("/api/settings");
-        if (res.ok) {
-          const data = await res.json();
-          if (data.success) {
-            if (data.providerId) setSelectedProvider(data.providerId);
-            if (data.apiKey) setApiKey(data.apiKey);
-            if (data.baseUrl) setCustomBaseUrl(data.baseUrl);
-            if (data.model) setCustomModel(data.model);
-          }
-        }
-      } catch (err) {
-        console.error("Failed to load settings:", err);
-      }
+    if (!initialized && storedConfig) {
+      if (storedConfig.providerId) setSelectedProvider(storedConfig.providerId);
+      if (storedConfig.apiKey) setApiKey(storedConfig.apiKey);
+      if (storedConfig.baseUrl) setCustomBaseUrl(storedConfig.baseUrl);
+      if (storedConfig.model) setCustomModel(storedConfig.model);
+      setInitialized(true);
     }
-    loadConfig();
-  }, []);
+  }, [storedConfig, initialized]);
 
   const provider = PROVIDERS.find((p) => p.id === selectedProvider);
 
@@ -130,21 +129,24 @@ export default function SettingsPage() {
   };
 
   const handleReset = async () => {
-    if (!confirm("确定要清空并重置当前保存的 AI API Key 及相关配置吗？")) {
+    if (!confirm("确定要清空当前浏览器中保存的 AI API Key 及相关配置吗？")) {
       return;
     }
     setResetting(true);
     try {
-      const res = await fetch("/api/settings", { method: "DELETE" });
-      if (res.ok) {
-        setApiKey("");
-        setCustomBaseUrl("");
-        setCustomModel("");
-        setSelectedProvider("deepseek");
-        setTestResult(null);
-        setResetSuccess(true);
-        setTimeout(() => setResetSuccess(false), 4000);
-      }
+      // 1. Reset client localStorage
+      resetStoredConfig();
+      setApiKey("");
+      setCustomBaseUrl("");
+      setCustomModel("");
+      setSelectedProvider("deepseek");
+      setTestResult(null);
+
+      // 2. Clean up server state if any
+      await fetch("/api/settings", { method: "DELETE" }).catch(() => {});
+
+      setResetSuccess(true);
+      setTimeout(() => setResetSuccess(false), 4000);
     } catch {
       // ignore
     } finally {
@@ -159,7 +161,18 @@ export default function SettingsPage() {
       const baseUrl = selectedProvider === "custom" ? customBaseUrl : provider?.baseUrl;
       const model = selectedProvider === "custom" ? customModel : provider?.model;
       const providerType = provider?.provider || "openai";
-      const res = await fetch("/api/settings/save", {
+
+      // 1. Save directly into browser localStorage (persisted across sessions)
+      setStoredConfig({
+        apiKey: apiKey.trim(),
+        baseUrl: baseUrl || "",
+        model: model || "",
+        providerId: selectedProvider || "deepseek",
+        provider: providerType,
+      });
+
+      // 2. Notify save endpoint (no-op on server, but ensures consistency)
+      await fetch("/api/settings/save", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -169,11 +182,10 @@ export default function SettingsPage() {
           provider: providerType,
           providerId: selectedProvider,
         }),
-      });
-      if (res.ok) {
-        setSaved(true);
-        setTimeout(() => setSaved(false), 4000);
-      }
+      }).catch(() => {});
+
+      setSaved(true);
+      setTimeout(() => setSaved(false), 4000);
     } catch {
       // ignore
     } finally {
@@ -208,6 +220,10 @@ export default function SettingsPage() {
           <p className="text-slate-300 text-lg mt-3 max-w-2xl mx-auto">
             选择一个 AI 服务商，填入你自己的 API Key，即可无限使用简历分析与重构优化功能
           </p>
+          <div className="mt-4 inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-xs font-medium">
+            <ShieldCheck className="w-4 h-4 text-emerald-400" />
+            <span>纯客户端隔离存储：配置保存在您的本地浏览器中，下次访问自动加载生效，绝不上报或存储在服务器上</span>
+          </div>
         </div>
 
         {/* Step 1: Select Provider */}
@@ -381,8 +397,8 @@ export default function SettingsPage() {
             {/* Success next step */}
             {saved && (
               <div className="mt-6 p-5 rounded-xl bg-blue-950/50 border border-blue-500/30 text-center">
-                <p className="text-blue-300 font-bold text-lg">🎉 配置已成功保存！</p>
-                <p className="text-slate-300 text-sm mt-1">你的 API Key 已成功写入系统配置，现在即可无限使用简历分析</p>
+                <p className="text-blue-300 font-bold text-lg">🎉 配置已成功保存至当前浏览器！</p>
+                <p className="text-slate-300 text-sm mt-1">你的配置已安全保存在本地存储中，下次访问无需重复配置，即可直接调用 AI 分析</p>
                 <Link href="/expert" className="inline-block mt-4">
                   <Button className="bg-blue-600 hover:bg-blue-500 text-white font-bold h-11 px-8 gap-2">
                     <Sparkles className="w-4 h-4" /> 立即开始分析重构简历

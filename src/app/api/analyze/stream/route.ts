@@ -19,7 +19,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const config = getAIConfig();
+    const config = getAIConfig(request);
     const mode = config.mode;
     const encoder = new TextEncoder();
 
@@ -41,7 +41,7 @@ export async function POST(request: Request) {
           let finalResult: AnalysisResult;
 
           if (mode === "llm") {
-            finalResult = await runLLMResumeAnalysisStream(input, optimizeStyle, onStageUpdate);
+            finalResult = await runLLMResumeAnalysisStream(input, optimizeStyle, onStageUpdate, config);
           } else {
             finalResult = await runMockResumeAnalysisStream(input, optimizeStyle, onStageUpdate);
           }

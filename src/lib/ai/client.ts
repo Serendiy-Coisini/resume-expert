@@ -1,5 +1,5 @@
 import type { ZodType } from "zod";
-import { getAIConfig } from "@/lib/ai/config";
+import { getAIConfig, type AIConfig } from "@/lib/ai/config";
 import { LLMError } from "@/lib/ai/errors";
 import { parseJSONFromMessage } from "@/lib/ai/parse-json";
 
@@ -20,18 +20,24 @@ interface ChatMessage {
   reasoning_content?: string | null;
 }
 
-export async function chatCompletionJSON<T>(options: ChatCompletionOptions): Promise<T> {
+export async function chatCompletionJSON<T>(
+  options: ChatCompletionOptions,
+  customConfig?: AIConfig
+): Promise<T> {
   try {
-    return await requestChatCompletionJSON<T>(options);
+    return await requestChatCompletionJSON<T>(options, customConfig);
   } catch (error) {
     if (error instanceof LLMError) throw error;
     throw new LLMError(error instanceof Error ? error.message : "大模型请求异常");
   }
 }
 
-async function requestChatCompletionJSON<T>(options: ChatCompletionOptions): Promise<T> {
-  const config = getAIConfig();
-  if (!config.apiKey) throw new LLMError("未配置 LLM_API_KEY");
+async function requestChatCompletionJSON<T>(
+  options: ChatCompletionOptions,
+  customConfig?: AIConfig
+): Promise<T> {
+  const config = customConfig ?? getAIConfig();
+  if (!config.apiKey) throw new LLMError("未配置 API Key");
 
   const data = await callChatCompletions(config, options);
   const choice = data.choices?.[0];
