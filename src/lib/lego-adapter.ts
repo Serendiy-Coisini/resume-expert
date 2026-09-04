@@ -114,9 +114,15 @@ function calculateSummaryHeight(
   const usableWidth = Math.max(180, cardWidthPx - 24);
   const charWidthPx = fontSizePx * 0.92;
   const charsPerLine = Math.max(15, Math.floor(usableWidth / charWidthPx));
-  const textLen = (summaryText || "").trim().length;
-  const totalLines = Math.max(1, Math.ceil(textLen / charsPerLine));
-  return Math.max(45, Math.ceil(totalLines * lineHeightPx + 16));
+  const paras = (summaryText || "").split(/\r?\n/).map((p) => p.trim()).filter(Boolean);
+
+  let totalLines = 0;
+  paras.forEach((p) => {
+    totalLines += Math.max(1, Math.ceil(p.length / charsPerLine));
+  });
+  if (totalLines === 0) totalLines = 1;
+
+  return Math.max(35, Math.ceil(totalLines * lineHeightPx + 14));
 }
 
 export function fillAiDataIntoExistingSchema(
@@ -198,9 +204,7 @@ export function fillAiDataIntoExistingSchema(
     const id = (widget.id || '').toLowerCase();
     const compName = (widget.componentName || '').toLowerCase();
     if (compName.includes('avatar') || title.includes('头像') || id.includes('avatar')) {
-      if (avatarUrl) {
-        widget.dataSource.avatarSrc = avatarUrl;
-      }
+      widget.dataSource.avatarSrc = avatarUrl || '';
       markUsed(widget);
     }
   });
@@ -273,12 +277,14 @@ export function fillAiDataIntoExistingSchema(
       title.includes('profile') ||
       id.includes('summary') ||
       id.includes('profile')) &&
-      !title.includes('标题')
+      !title.includes('标题') &&
+      !title.includes('线') &&
+      !id.includes('line')
     ) {
       const cardWidth = widget.css.width || 740;
       const fontSz = widget.css.fontSize || 12.5;
       const sumH = calculateSummaryHeight(summary, cardWidth, fontSz, 20);
-      widget.css.height = Math.max(45, sumH);
+      widget.css.height = Math.min(220, Math.max(35, sumH));
       widget.dataSource.text = currentText.includes('【自我评价】') ? `【自我评价】\n${summary}` : summary;
       markUsed(widget);
     }
@@ -291,10 +297,13 @@ export function fillAiDataIntoExistingSchema(
     const compName = (widget.componentName || '').toLowerCase();
 
     return (
-      (compName.includes('exper') || id.includes('work') || title.includes('工作经历') || title.includes('工作经验')) &&
       !title.includes('标题') &&
+      !title.includes('线') &&
       !title.includes('项目') &&
-      !title.includes('教育')
+      !title.includes('教育') &&
+      !id.includes('line') &&
+      !id.includes('title') &&
+      (compName.includes('exper') || id.includes('work') || title.includes('经历卡片') || title.includes('工作'))
     );
   });
 
@@ -318,7 +327,7 @@ export function fillAiDataIntoExistingSchema(
 
   if (workList.length > workCandidates.length && workCandidates.length > 0) {
     const templateWidget = workCandidates[workCandidates.length - 1];
-    let lastTop = (Number(templateWidget.css.top) || 0) + (Number(templateWidget.css.height) || 100) + 12;
+    const insertIdx = page.children.indexOf(templateWidget);
 
     for (let idx = workCandidates.length; idx < workList.length; idx++) {
       const w = workList[idx];
@@ -330,7 +339,7 @@ export function fillAiDataIntoExistingSchema(
       const extraWidget: IWidget = JSON.parse(JSON.stringify(templateWidget));
       extraWidget.id = `widget-work-extra-${idx}-${Date.now()}`;
       extraWidget.title = `工作 ${idx + 1}`;
-      extraWidget.css.top = lastTop;
+      extraWidget.css.top = (Number(templateWidget.css.top) || 0) + (idx - workCandidates.length + 1) * 0.1;
       extraWidget.css.height = Math.max(65, cardH);
       extraWidget.dataSource.companyName = w.company;
       extraWidget.dataSource.jobTitle = w.role;
@@ -338,9 +347,8 @@ export function fillAiDataIntoExistingSchema(
       extraWidget.dataSource.workContent = formattedBullets;
       extraWidget.dataSource.text = `${w.company} · ${w.role}\n${formattedBullets}`;
 
-      page.children.push(extraWidget);
+      page.children.splice(insertIdx + 1 + (idx - workCandidates.length), 0, extraWidget);
       markUsed(extraWidget);
-      lastTop += cardH + 12;
     }
   }
 
@@ -348,10 +356,14 @@ export function fillAiDataIntoExistingSchema(
   const projectCandidates = page.children.filter(isUnused).filter((widget) => {
     const title = (widget.title || '').toLowerCase();
     const id = (widget.id || '').toLowerCase();
+    const compName = (widget.componentName || '').toLowerCase();
 
     return (
-      (id.includes('project') || title.includes('项目经历') || title.includes('项目经验') || title.includes('项目作品')) &&
-      !title.includes('标题')
+      !title.includes('标题') &&
+      !title.includes('线') &&
+      !id.includes('line') &&
+      !id.includes('title') &&
+      (compName.includes('exper') || id.includes('project') || title.includes('项目卡片') || title.includes('项目 1') || title.includes('项目 2'))
     );
   });
 
@@ -375,7 +387,7 @@ export function fillAiDataIntoExistingSchema(
 
   if (projectList.length > projectCandidates.length && projectCandidates.length > 0) {
     const templateWidget = projectCandidates[projectCandidates.length - 1];
-    let lastTop = (Number(templateWidget.css.top) || 0) + (Number(templateWidget.css.height) || 100) + 12;
+    const insertIdx = page.children.indexOf(templateWidget);
 
     for (let idx = projectCandidates.length; idx < projectList.length; idx++) {
       const p = projectList[idx];
@@ -387,7 +399,7 @@ export function fillAiDataIntoExistingSchema(
       const extraWidget: IWidget = JSON.parse(JSON.stringify(templateWidget));
       extraWidget.id = `widget-project-extra-${idx}-${Date.now()}`;
       extraWidget.title = `项目 ${idx + 1}`;
-      extraWidget.css.top = lastTop;
+      extraWidget.css.top = (Number(templateWidget.css.top) || 0) + (idx - projectCandidates.length + 1) * 0.1;
       extraWidget.css.height = Math.max(65, cardH);
       extraWidget.dataSource.companyName = p.name;
       extraWidget.dataSource.jobTitle = p.role;
@@ -395,9 +407,8 @@ export function fillAiDataIntoExistingSchema(
       extraWidget.dataSource.workContent = formattedBullets;
       extraWidget.dataSource.text = `${p.name} · ${p.role}\n${formattedBullets}`;
 
-      page.children.push(extraWidget);
+      page.children.splice(insertIdx + 1 + (idx - projectCandidates.length), 0, extraWidget);
       markUsed(extraWidget);
-      lastTop += cardH + 12;
     }
   }
 
@@ -421,24 +432,36 @@ export function fillAiDataIntoExistingSchema(
   });
 
   // 9. Skills & Tools Widget
-  page.children.filter(isUnused).forEach((widget) => {
+  const skillWidgets = page.children.filter(isUnused).filter((widget) => {
     const title = (widget.title || '').toLowerCase();
     const id = (widget.id || '').toLowerCase();
-    const currentText = typeof widget.dataSource?.text === 'string' ? widget.dataSource.text : '';
-
-    if ((title.includes('技能') || title.includes('工具') || id.includes('skill')) && !title.includes('标题')) {
-      const formattedSkills = currentText.includes('•')
-        ? skills.map((s) => `• ${s}`).join('\n')
-        : skills.join('  ·  ');
-
-      widget.dataSource.text = formattedSkills;
-      const fontSz = widget.css.fontSize || 12;
-      const wWidth = widget.css.width || 740;
-      const calcH = calculateSummaryHeight(formattedSkills, wWidth, fontSz, 20);
-      widget.css.height = Math.max(26, calcH);
-      markUsed(widget);
-    }
+    return (title.includes('技能') || title.includes('工具') || id.includes('skill')) && !title.includes('标题') && !title.includes('分割线');
   });
+
+  if (skillWidgets.length === 1) {
+    const widget = skillWidgets[0];
+    const currentText = typeof widget.dataSource?.text === 'string' ? widget.dataSource.text : '';
+    const formattedSkills = currentText.includes('•')
+      ? skills.map((s) => `• ${s}`).join('\n')
+      : skills.join('  ·  ');
+
+    widget.dataSource.text = formattedSkills;
+    const fontSz = widget.css.fontSize || 12;
+    const wWidth = widget.css.width || 740;
+    const calcH = calculateSummaryHeight(formattedSkills, wWidth, fontSz, 20);
+    widget.css.height = Math.max(26, calcH);
+    markUsed(widget);
+  } else if (skillWidgets.length > 1) {
+    skillWidgets.forEach((widget, sIdx) => {
+      const sk = skills[sIdx] || skills[sIdx % skills.length] || '';
+      widget.dataSource.text = sk;
+      if (widget.css.width && widget.css.width < 350) {
+        widget.css.width = Math.max(65, Math.min(260, Math.ceil(sk.length * 11 + 22)));
+        widget.css.height = 24;
+      }
+      markUsed(widget);
+    });
+  }
 
   // Clean remaining unused text placeholders containing sample names to prevent ghost text
   page.children.filter(isUnused).forEach((widget) => {
@@ -457,61 +480,99 @@ export function fillAiDataIntoExistingSchema(
     }
   });
 
-  // Clamp right edge boundary for all widgets so no element spills past 770px
+  // Clamp right edge boundary for all widgets so no element spills past 780px
   page.children.forEach((widget) => {
     const wLeft = Number(widget.css.left) || 30;
     const wWidth = Number(widget.css.width) || 200;
-    if (wLeft + wWidth > 770) {
-      widget.css.width = Math.max(120, 770 - wLeft);
+    if (wLeft + wWidth > 780) {
+      widget.css.width = Math.max(80, 780 - wLeft);
     }
   });
 
   // =========================================================================
-  // SMART LAYOUT CASCADE RE-ALIGNMENT (Prevent Overlapping / Clashing Elements)
+  // SMART 2D BOUNDING-BOX COLLISION & FLOW CASCADE (Prevent Overlapping Elements)
   // =========================================================================
-  const columns: Array<IWidget[]> = [];
+  const isBackgroundWidget = (w: IWidget) => {
+    const id = (w.id || '').toLowerCase();
+    const title = (w.title || '').toLowerCase();
+    const zIndex = Number(w.css.zIndex) || 1;
+    const h = Number(w.css.height) || 0;
 
-  page.children.forEach((widget) => {
-    const wLeft = Number(widget.css.left) || 0;
+    return (
+      id.includes('sidebar-bg') ||
+      id.includes('banner-bg') ||
+      id.includes('card-bg') ||
+      title.includes('背景框') ||
+      title.includes('底色框') ||
+      (zIndex <= 1 && h >= 300)
+    );
+  };
 
-    let matchedCol = columns.find((col) => {
-      const colLeft = Number(col[0].css.left) || 0;
-      return Math.abs(wLeft - colLeft) < 60;
+  // Sort foreground widgets topologically by original top, then left
+  const foregroundWidgets = page.children
+    .filter((w) => !isBackgroundWidget(w))
+    .sort((a, b) => {
+      const topA = Number(a.css.top) || 0;
+      const topB = Number(b.css.top) || 0;
+      if (Math.abs(topA - topB) > 4) return topA - topB;
+      return (Number(a.css.left) || 0) - (Number(b.css.left) || 0);
     });
-
-    if (!matchedCol) {
-      matchedCol = [];
-      columns.push(matchedCol);
-    }
-    matchedCol.push(widget);
-  });
 
   let maxCanvasBottom = 1160;
 
-  columns.forEach((colWidgets) => {
-    colWidgets.sort((a, b) => (Number(a.css.top) || 0) - (Number(b.css.top) || 0));
+  for (let i = 0; i < foregroundWidgets.length; i++) {
+    const curr = foregroundWidgets[i];
+    const currLeft = Number(curr.css.left) || 0;
+    const currWidth = Number(curr.css.width) || 200;
+    let currTop = Number(curr.css.top) || 0;
 
-    for (let i = 1; i < colWidgets.length; i++) {
-      const prev = colWidgets[i - 1];
-      const curr = colWidgets[i];
-
+    for (let j = 0; j < i; j++) {
+      const prev = foregroundWidgets[j];
+      const prevLeft = Number(prev.css.left) || 0;
+      const prevWidth = Number(prev.css.width) || 200;
       const prevTop = Number(prev.css.top) || 0;
-      const prevHeight = Number(prev.css.height) || 40;
+      const prevHeight = Number(prev.css.height) || 30;
       const prevBottom = prevTop + prevHeight;
 
-      const origCurrTop = Number(curr.css.top) || 0;
-      const minGap = 8;
-      const targetTop = Math.max(origCurrTop, prevBottom + minGap);
+      // Check horizontal overlap with 4px tolerance
+      const hasHorizontalOverlap = Math.max(currLeft, prevLeft) < Math.min(currLeft + currWidth, prevLeft + prevWidth) - 4;
 
-      if (targetTop > origCurrTop) {
-        curr.css.top = Math.ceil(targetTop);
-      }
-
-      const currBottom = (Number(curr.css.top) || 0) + (Number(curr.css.height) || 40);
-      if (currBottom > maxCanvasBottom) {
-        maxCanvasBottom = currBottom;
+      if (hasHorizontalOverlap) {
+        const minGap = 8;
+        if (prevBottom + minGap > currTop) {
+          currTop = Math.ceil(prevBottom + minGap);
+        }
       }
     }
+
+    curr.css.top = currTop;
+
+    const currBottom = currTop + (Number(curr.css.height) || 30);
+    if (currBottom > maxCanvasBottom) {
+      maxCanvasBottom = currBottom;
+    }
+  }
+
+  // Dynamically expand background containers to fit all enclosed widgets
+  page.children.filter(isBackgroundWidget).forEach((bg) => {
+    const bgLeft = Number(bg.css.left) || 0;
+    const bgWidth = Number(bg.css.width) || 200;
+    let maxChildBottom = (Number(bg.css.top) || 0) + 100;
+
+    foregroundWidgets.forEach((w) => {
+      const wLeft = Number(w.css.left) || 0;
+      const wWidth = Number(w.css.width) || 50;
+      const wBottom = (Number(w.css.top) || 0) + (Number(w.css.height) || 30);
+
+      // If widget falls within the horizontal corridor of the background container
+      if (wLeft >= bgLeft - 10 && wLeft + wWidth <= bgLeft + bgWidth + 10) {
+        if (wBottom + 25 > maxChildBottom) {
+          maxChildBottom = wBottom + 25;
+        }
+      }
+    });
+
+    bg.css.height = Math.max(Number(bg.css.height) || 100, Math.ceil(maxChildBottom - (Number(bg.css.top) || 0)));
   });
 
   newSchema.css.height = Math.max(1160, Math.ceil(maxCanvasBottom + 50));
@@ -722,7 +783,7 @@ export function buildLegoSchemaFromResume(
       }
     });
 
-    const summaryH = calculateSummaryHeight(summary, 206, 11.5, 18);
+    const summaryH = Math.min(260, calculateSummaryHeight(summary, 206, 11.5, 18));
 
     // Summary Card
     children.push({
@@ -2018,8 +2079,8 @@ export function buildLegoSchemaFromResume(
     });
     topPos += sumH + 18;
 
-    // 2. Core Skills
-    addClassicSectionTitle('核心能力', 'coreskills');
+    // 2. Core Skills & Tools
+    addClassicSectionTitle('核心能力与专业技能', 'coreskills');
     let skillX = 30;
     let skillY = topPos;
     skills.forEach((sk, sIdx) => {
@@ -2119,28 +2180,7 @@ export function buildLegoSchemaFromResume(
 
     topPos += 6;
 
-    // 5. Skills & Tools
-    addClassicSectionTitle('技能工具', 'skills');
-    children.push({
-      id: 'widget-skills-classic-content',
-      componentName: 'hj-text-1',
-      title: '技能工具清单',
-      css: {
-        left: 30,
-        top: topPos,
-        width: 760,
-        height: 40,
-        zIndex: 2,
-        fontColor: '#334155',
-        fontSize: 12.5,
-        lineHeight: 1.6,
-        textAlign: 'left'
-      },
-      dataSource: { text: skills.join('  ·  ') }
-    });
-    topPos += 50;
-
-    // 6. Education
+    // 5. Education
     addClassicSectionTitle('教育背景', 'education');
     children.push({
       id: 'widget-edu-classic-content',

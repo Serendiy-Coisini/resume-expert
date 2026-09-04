@@ -743,7 +743,7 @@ function renderTemplateHTMLInternal(
             <div class="name">${p.name}</div>
             <div class="contact">${p.email} | ${p.phone} | ${p.location} | 求职意向：${resume.jobIntent}</div>
           </div>
-          ${avatarTag ? `<div><img src="${avatarUrl}" style="width:64px; height:80px; object-fit:cover; border-radius:4px; border:2px solid #fff;" /></div>` : ""}
+          ${avatarTag ? `<div>${avatarTag}</div>` : ""}
         </div>
 
         <div class="content">

@@ -107,10 +107,22 @@ export function ExportStep() {
               avatarUrl: base64,
             },
           },
+          ...(englishResume
+            ? {
+                englishResume: {
+                  ...englishResume,
+                  personalInfo: {
+                    ...(englishResume.personalInfo || { name: "", email: "", phone: "", location: "" }),
+                    avatarUrl: base64,
+                  },
+                },
+              }
+            : {}),
         });
       }
     };
     reader.readAsDataURL(file);
+    e.target.value = "";
   };
 
   const handleRemoveAvatar = () => {
@@ -124,7 +136,21 @@ export function ExportStep() {
           avatarUrl: "",
         },
       },
+      ...(englishResume
+        ? {
+            englishResume: {
+              ...englishResume,
+              personalInfo: {
+                ...(englishResume.personalInfo || { name: "", email: "", phone: "", location: "" }),
+                avatarUrl: "",
+              },
+            },
+          }
+        : {}),
     });
+    if (avatarInputRef.current) {
+      avatarInputRef.current.value = "";
+    }
   };
 
   const handleCopy = async () => {
@@ -436,7 +462,7 @@ export function ExportStep() {
               <input
                 ref={avatarInputRef}
                 type="file"
-                accept="image/png,image/jpeg,image/jpg"
+                accept="image/*,.png,.jpg,.jpeg,.webp,.jfif,.bmp"
                 className="hidden"
                 onChange={handleAvatarUpload}
               />

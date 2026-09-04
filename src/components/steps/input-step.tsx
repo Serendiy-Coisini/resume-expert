@@ -56,6 +56,7 @@ export function InputStep() {
     userInput,
     setUserInput,
     loadExampleData,
+    analysisResult,
     setAnalysisResult,
     setAnalyzing,
     setAnalysisError,
@@ -194,9 +195,63 @@ export function InputStep() {
       const base64 = event.target?.result as string;
       if (base64) {
         setUserInput({ avatarUrl: base64 });
+        if (analysisResult?.finalResume) {
+          setAnalysisResult({
+            ...analysisResult,
+            finalResume: {
+              ...analysisResult.finalResume,
+              personalInfo: {
+                ...(analysisResult.finalResume.personalInfo || { name: "", email: "", phone: "", location: "" }),
+                avatarUrl: base64,
+              },
+            },
+            ...(analysisResult.englishResume
+              ? {
+                  englishResume: {
+                    ...analysisResult.englishResume,
+                    personalInfo: {
+                      ...(analysisResult.englishResume.personalInfo || { name: "", email: "", phone: "", location: "" }),
+                      avatarUrl: base64,
+                    },
+                  },
+                }
+              : {}),
+          });
+        }
       }
     };
     reader.readAsDataURL(file);
+    e.target.value = "";
+  };
+
+  const handleRemoveAvatar = () => {
+    setUserInput({ avatarUrl: "" });
+    if (analysisResult?.finalResume) {
+      setAnalysisResult({
+        ...analysisResult,
+        finalResume: {
+          ...analysisResult.finalResume,
+          personalInfo: {
+            ...(analysisResult.finalResume.personalInfo || { name: "", email: "", phone: "", location: "" }),
+            avatarUrl: "",
+          },
+        },
+        ...(analysisResult.englishResume
+          ? {
+              englishResume: {
+                ...analysisResult.englishResume,
+                personalInfo: {
+                  ...(analysisResult.englishResume.personalInfo || { name: "", email: "", phone: "", location: "" }),
+                  avatarUrl: "",
+                },
+              },
+            }
+          : {}),
+      });
+    }
+    if (avatarInputRef.current) {
+      avatarInputRef.current.value = "";
+    }
   };
 
   const processResumeFile = async (file: File) => {
@@ -693,7 +748,7 @@ export function InputStep() {
                   <input
                     ref={avatarInputRef}
                     type="file"
-                    accept="image/png,image/jpeg,image/jpg"
+                    accept="image/*,.png,.jpg,.jpeg,.webp,.jfif,.bmp"
                     className="hidden"
                     onChange={handleAvatarUpload}
                   />
@@ -713,7 +768,7 @@ export function InputStep() {
                         variant="ghost"
                         size="sm"
                         className="text-red-600 hover:text-red-700 hover:bg-red-50"
-                        onClick={() => setUserInput({ avatarUrl: "" })}
+                        onClick={handleRemoveAvatar}
                       >
                         删除照片
                       </Button>

@@ -85,7 +85,19 @@ export const WidgetRenderer: React.FC<WidgetRendererProps> = ({ widget }) => {
     return (
       <div style={avatarStyle}>
         {avatarSrc ? (
-          <img src={avatarSrc} alt="Avatar" className="w-full h-full pointer-events-none" style={{ objectFit: 'cover' }} />
+          <img
+            src={avatarSrc}
+            alt="Avatar"
+            className="w-full h-full pointer-events-none"
+            style={{
+              width: '100%',
+              height: '100%',
+              objectFit: 'cover',
+              display: 'block',
+              maxWidth: '100%',
+              maxHeight: '100%'
+            }}
+          />
         ) : (
           <div className="w-full h-full bg-slate-100 flex flex-col items-center justify-center text-slate-400 p-2 text-center select-none">
             <User className="w-8 h-8 text-slate-300 mb-1 shrink-0" />
@@ -144,7 +156,19 @@ export const WidgetRenderer: React.FC<WidgetRendererProps> = ({ widget }) => {
     return (
       <div style={style}>
         {avatarSrc ? (
-          <img src={avatarSrc} alt="Image" className="w-full h-full pointer-events-none" style={{ objectFit: 'cover' }} />
+          <img
+            src={avatarSrc}
+            alt="Image"
+            className="w-full h-full pointer-events-none"
+            style={{
+              width: '100%',
+              height: '100%',
+              objectFit: 'cover',
+              display: 'block',
+              maxWidth: '100%',
+              maxHeight: '100%'
+            }}
+          />
         ) : (
           <div className="w-full h-full bg-slate-100 flex flex-col items-center justify-center text-slate-400 p-2 text-center select-none">
             <ImageIcon className="w-8 h-8 text-slate-300 mb-1 shrink-0" />

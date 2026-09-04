@@ -109,6 +109,16 @@ export const LegoDesigner: React.FC<LegoDesignerProps> = ({ standalone }) => {
     };
   }, [isResizingLeft, isResizingRight]);
 
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && isFullScreen) {
+        setIsFullScreen(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isFullScreen]);
+
   const containerClasses = standalone
     ? 'w-full h-full bg-slate-100 flex flex-col overflow-hidden select-none'
     : (isFullScreen

@@ -6,12 +6,17 @@ const TEMPLATES_STORAGE_KEY = 'LEGO_MY_TEMPLATES';
 
 export interface SavedTemplate {
   id: string;
+  _id?: string;
   name: string;
+  title?: string;
   category: string;
   description: string;
   cover: string;
+  previewUrl?: string;
   createTime: string;
   schema: IHJSchema;
+  template_json?: IHJSchema;
+  isCustom?: boolean;
 }
 
 const DEFAULT_PAGE_WIDTH = 820;
@@ -33,10 +38,7 @@ export const DEFAULT_LEGO_SCHEMA: IHJSchema = {
     height: DEFAULT_PAGE_HEIGHT,
     background: '#ffffff',
     opacity: 1,
-    backgroundImage: '',
-    fontFamily: 'Inter, sans-serif',
-    themeColor: '#2563eb',
-    pagePadding: { top: 0, right: 0, bottom: 0, left: 0 }
+    pagePadding: { top: 30, right: 30, bottom: 30, left: 30 }
   },
   config: {
     title: '我的积木简历'
@@ -46,8 +48,76 @@ export const DEFAULT_LEGO_SCHEMA: IHJSchema = {
 const MAX_HISTORY_LIMIT = 30;
 
 function deepClone<T>(obj: T): T {
+  if (obj === null || typeof obj !== 'object') return obj;
+  if (typeof structuredClone === 'function') {
+    try {
+      return structuredClone(obj);
+    } catch {
+      // fallback
+    }
+  }
   return JSON.parse(JSON.stringify(obj));
 }
+
+// Load templates from localStorage on init
+const loadTemplatesFromStorage = (): SavedTemplate[] => {
+  if (typeof window === 'undefined') return [];
+  try {
+    const raw = localStorage.getItem(TEMPLATES_STORAGE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        return parsed.map((item) => ({
+          id: item.id || item._id || `tpl-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          _id: item._id || item.id,
+          name: item.name || item.title || '自定义模板',
+          title: item.title || item.name || '自定义模板',
+          category: item.category || '个人自定义',
+          description: item.description || '',
+          cover: item.cover || item.previewUrl || '',
+          previewUrl: item.previewUrl || item.cover || '',
+          createTime: item.createTime || new Date().toLocaleDateString('zh-CN'),
+          schema: item.schema || item.template_json || deepClone(DEFAULT_LEGO_SCHEMA),
+          template_json: item.template_json || item.schema || deepClone(DEFAULT_LEGO_SCHEMA),
+          isCustom: true
+        }));
+      }
+    }
+  } catch (err) {
+    console.warn('读取本地模板缓存失败：', err);
+  }
+  return [];
+};
+
+const saveTemplatesToStorage = (templates: SavedTemplate[]) => {
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.setItem(TEMPLATES_STORAGE_KEY, JSON.stringify(templates));
+  } catch (err) {
+    console.warn('localStorage 空间受限，尝试压缩模板封面缩略图...', err);
+    try {
+      // Fallback 1: Keep covers only for the 2 most recent templates to save quota
+      const lightweight = templates.map((t, idx) => ({
+        ...t,
+        cover: idx < 2 ? t.cover : '',
+        previewUrl: idx < 2 ? (t.previewUrl || t.cover) : ''
+      }));
+      localStorage.setItem(TEMPLATES_STORAGE_KEY, JSON.stringify(lightweight));
+    } catch {
+      try {
+        // Fallback 2: Strip all base64 covers and retain latest 10 templates
+        const stripped = templates.slice(0, 10).map((t) => ({
+          ...t,
+          cover: '',
+          previewUrl: ''
+        }));
+        localStorage.setItem(TEMPLATES_STORAGE_KEY, JSON.stringify(stripped));
+      } catch (finalErr) {
+        console.error('无法持久化模板至 localStorage：', finalErr);
+      }
+    }
+  }
+};
 
 interface LegoDesignerState {
   schema: IHJSchema;
@@ -116,21 +186,6 @@ export const useLegoDesignerStore = create<LegoDesignerState>((set, get) => {
       newUndo.shift();
     }
     return { undoStack: newUndo, redoStack: [] };
-  };
-
-  // Load templates from localStorage on init
-  const loadTemplatesFromStorage = (): SavedTemplate[] => {
-    if (typeof window === 'undefined') return [];
-    try {
-      const raw = localStorage.getItem(TEMPLATES_STORAGE_KEY);
-      if (raw) return JSON.parse(raw) as SavedTemplate[];
-    } catch { /* ignore */ }
-    return [];
-  };
-
-  const saveTemplatesToStorage = (templates: SavedTemplate[]) => {
-    if (typeof window === 'undefined') return;
-    localStorage.setItem(TEMPLATES_STORAGE_KEY, JSON.stringify(templates));
   };
 
   return {
@@ -839,35 +894,44 @@ export const useLegoDesignerStore = create<LegoDesignerState>((set, get) => {
 
     saveAsTemplate: (name, category, description, cover) => {
       const { schema, savedTemplates } = get();
+      const clonedSchema = deepClone(schema);
       const newTemplate: SavedTemplate = {
         id: `tpl-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
-        name,
+        _id: `tpl-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+        name: name || '自定义模板',
+        title: name || '自定义模板',
         category: category || '个人自定义',
         description: description || '',
-        cover,
-        createTime: new Date().toLocaleString(),
-        schema: deepClone(schema)
+        cover: cover || '',
+        previewUrl: cover || '',
+        createTime: new Date().toLocaleString('zh-CN', { hour12: false }),
+        schema: clonedSchema,
+        template_json: clonedSchema,
+        isCustom: true
       };
-      const updated = [newTemplate, ...savedTemplates];
+      const updated = [newTemplate, ...savedTemplates.filter(t => t.id !== newTemplate.id && t._id !== newTemplate.id)];
       saveTemplatesToStorage(updated);
       set({ savedTemplates: updated });
     },
 
     deleteSavedTemplate: (id) => {
       const { savedTemplates } = get();
-      const updated = savedTemplates.filter(t => t.id !== id);
+      const updated = savedTemplates.filter(t => t.id !== id && t._id !== id);
       saveTemplatesToStorage(updated);
       set({ savedTemplates: updated });
     },
 
     loadSavedTemplate: (id) => {
       const { savedTemplates, schema } = get();
-      const tpl = savedTemplates.find(t => t.id === id);
+      const tpl = savedTemplates.find(t => t.id === id || t._id === id);
       if (!tpl) return;
+      const targetSchema = tpl.schema || tpl.template_json;
+      if (!targetSchema) return;
       const historyUpdate = saveStateToHistory(schema);
       set({
-        schema: deepClone(tpl.schema),
+        schema: deepClone(normalizeLegoSchema(targetSchema)),
         selectedWidgetId: null,
+        selectedWidgetIds: [],
         pageActiveIndex: 0,
         ...historyUpdate
       });
@@ -876,7 +940,7 @@ export const useLegoDesignerStore = create<LegoDesignerState>((set, get) => {
     updateTemplateCover: (id, cover) => {
       const { savedTemplates } = get();
       const updated = savedTemplates.map(t =>
-        t.id === id ? { ...t, cover } : t
+        (t.id === id || t._id === id) ? { ...t, cover, previewUrl: cover } : t
       );
       saveTemplatesToStorage(updated);
       set({ savedTemplates: updated });

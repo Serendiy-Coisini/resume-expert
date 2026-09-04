@@ -44,19 +44,37 @@ export const SaveTemplateDialog: React.FC<SaveTemplateDialogProps> = ({ open, on
 
   const captureCanvasCover = async (): Promise<string> => {
     try {
-      const canvasEl = document.querySelector('.lego-canvas-area') as HTMLElement;
+      const canvasEl = (document.getElementById('lego-canvas-page') ||
+        document.querySelector('.canvas-page-bg') ||
+        document.querySelector('[data-page-padding]')) as HTMLElement;
       if (!canvasEl) return '';
-      const canvas = await html2canvas(canvasEl, {
-        scale: 0.3,
+
+      const canvasPromise = html2canvas(canvasEl, {
+        scale: 0.25,
         useCORS: true,
+        allowTaint: true,
         backgroundColor: '#ffffff',
         logging: false,
-        width: canvasEl.scrollWidth,
-        height: Math.min(canvasEl.scrollHeight, 1200),
+        ignoreElements: (element) => {
+          return (
+            element.getAttribute('data-canvas-ui') === 'true' ||
+            element.classList.contains('page-break-indicator-ui')
+          );
+        },
+        width: canvasEl.scrollWidth || 820,
+        height: Math.min(canvasEl.scrollHeight || 1160, 1160),
       });
-      return canvas.toDataURL('image/jpeg', 0.6);
+
+      const timeoutPromise = new Promise<null>((resolve) =>
+        setTimeout(() => resolve(null), 2500)
+      );
+
+      const canvas = await Promise.race([canvasPromise, timeoutPromise]);
+      if (!canvas) return '';
+
+      return canvas.toDataURL('image/jpeg', 0.5);
     } catch (err) {
-      console.warn('截图失败：', err);
+      console.warn('生成封面缩略图失败，将使用默认封面：', err);
       return '';
     }
   };
@@ -73,11 +91,11 @@ export const SaveTemplateDialog: React.FC<SaveTemplateDialogProps> = ({ open, on
         ? customCategory.trim()
         : category;
       saveAsTemplate(name.trim(), finalCategory, description.trim(), cover);
-      alert('🎉 模板保存成功！可在左侧【模板】标签中随时使用。');
+      alert('🎉 模板保存成功！可在左侧【模板】标签中随时查看与载入。');
       onClose();
     } catch (err) {
       console.error('保存模板失败：', err);
-      alert('保存模板失败，请重试');
+      alert(err instanceof Error ? `保存模板失败：${err.message}` : '保存模板失败，请重试');
     } finally {
       setSaving(false);
     }

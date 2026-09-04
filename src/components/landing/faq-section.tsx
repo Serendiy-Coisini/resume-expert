@@ -43,14 +43,6 @@ export function FAQSection() {
       a: "我们高度重视个人隐私与信息安全：1. 系统内置 PII (Personally Identifiable Information) 隐私脱敏模块，在向 AI 接口发送请求前，会自动识别并替换姓名、手机号、电子邮箱、身份证号等敏感信息；2. 您的 API Key 及个性化设置均仅保存在您本地设备存储或指定环境变量中，绝不会被上传或转售给第三方，也不会用于公共大模型训练。",
     },
     {
-      id: "faq-4",
-      category: "privacy",
-      categoryLabel: "隐私与导出",
-      tag: "ATS 友好",
-      q: "导出的 PDF 简历能否被 HR 的 ATS（简历自动筛选系统）正确识别？",
-      a: "完全可以！导出的 PDF 基于原生文本矢量规范渲染生成，并非胶片图片转换。简历中的所有文字均支持鼠标高亮选择与提取复制，确保各大招聘平台及企业 HR 部门的 ATS 筛选系统（如 Workday、Moka、北森、拉勾等）能够 100% 精确提取文本，避免因图片扫描导致被筛掉。",
-    },
-    {
       id: "faq-5",
       category: "diagnosis",
       categoryLabel: "诊断与重构",
@@ -80,7 +72,7 @@ export function FAQSection() {
     { key: "all", label: "全部问题", icon: HelpCircle },
     { key: "diagnosis", label: "诊断与 STAR 重构", icon: Sparkles },
     { key: "ai", label: "AI 模型与配置", icon: Cpu },
-    { key: "privacy", label: "隐私安全与 ATS 导出", icon: ShieldCheck },
+    { key: "privacy", label: "隐私与数据安全", icon: ShieldCheck },
   ];
 
   const filteredFaqs = faqs.filter((faq) => {

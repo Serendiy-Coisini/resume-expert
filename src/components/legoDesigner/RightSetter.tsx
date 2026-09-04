@@ -1,6 +1,9 @@
-import React, { useRef, useState } from 'react';
+import React, { useRef, useState, useEffect } from 'react';
 import { useLegoDesignerStore } from '@/store/lego-designer-store';
 import { useResumeStore } from '@/store/resume-store';
+import { PhotoManagerDialog } from './PhotoManagerDialog';
+import { applyThemeColorToSchema, THEME_COLOR_PRESETS, hslToHex, hexToHsl } from '@/lib/theme-utils';
+import type { IHJSchema } from '@/types/lego';
 import {
   AlignLeft,
   AlignCenter,
@@ -21,8 +24,184 @@ import {
   QrCode,
   Paintbrush,
   Briefcase,
-  SlidersHorizontal
+  SlidersHorizontal,
+  Camera,
+  Check
 } from 'lucide-react';
+
+interface RightSetterThemeSectionProps {
+  schema: IHJSchema;
+  setSchema: (schema: IHJSchema, saveHistory?: boolean) => void;
+  currentThemeColor: string;
+  setTemplateOptions: (opts: { themeColor?: string; [key: string]: unknown }) => void;
+}
+
+const RightSetterThemeSection: React.FC<RightSetterThemeSectionProps> = ({
+  schema,
+  setSchema,
+  currentThemeColor,
+  setTemplateOptions
+}) => {
+  const rafRef = useRef<number | null>(null);
+  const [localColor, setLocalColor] = useState(currentThemeColor);
+
+  useEffect(() => {
+    setLocalColor(currentThemeColor);
+  }, [currentThemeColor]);
+
+  const handlePreviewColor = (color: string) => {
+    setLocalColor(color);
+    if (rafRef.current) {
+      cancelAnimationFrame(rafRef.current);
+    }
+    rafRef.current = requestAnimationFrame(() => {
+      const updated = applyThemeColorToSchema(schema, color);
+      setSchema(updated, false);
+    });
+  };
+
+  const handleCommitColor = (color: string) => {
+    if (rafRef.current) {
+      cancelAnimationFrame(rafRef.current);
+      rafRef.current = null;
+    }
+    setLocalColor(color);
+    const updated = applyThemeColorToSchema(schema, color);
+    setSchema(updated, true);
+    setTemplateOptions({ themeColor: color });
+  };
+
+  const localHsl = hexToHsl(localColor);
+
+  const handleHuePreview = (hue: number) => {
+    const newHex = hslToHex(hue, localHsl.s > 40 ? localHsl.s : 85, localHsl.l >= 20 && localHsl.l <= 60 ? localHsl.l : 38);
+    handlePreviewColor(newHex);
+  };
+
+  const handleToneSelect = (l: number, s: number = 85) => {
+    const newHex = hslToHex(localHsl.h, s, l);
+    handleCommitColor(newHex);
+  };
+
+  return (
+    <div className="space-y-3 p-3 bg-blue-50/50 border border-blue-200/60 rounded-xl shadow-sm">
+      <div className="flex items-center justify-between">
+        <label className="font-bold text-slate-800 flex items-center gap-1.5 text-xs">
+          <Palette className="w-4 h-4 text-blue-600" /> 简历主题配色方案
+        </label>
+        <span className="text-[10px] font-mono text-slate-500 font-semibold">{localColor}</span>
+      </div>
+      <p className="text-[10px] text-slate-500 leading-tight">
+        一键为简历所有标题、图标、标签、分割线应用高质感主题配色。
+      </p>
+
+      <div className="grid grid-cols-2 gap-1.5 pt-1">
+        {THEME_COLOR_PRESETS.map((p) => {
+          const isSelected = localColor.toLowerCase() === p.color.toLowerCase();
+          return (
+            <button
+              key={p.color}
+              type="button"
+              onClick={() => handleCommitColor(p.color)}
+              className={`p-2 rounded-lg border text-left flex items-center gap-2 transition-all cursor-pointer ${
+                isSelected
+                  ? 'bg-blue-100/70 border-blue-500 text-blue-900 font-bold ring-1 ring-blue-500 shadow-sm'
+                  : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
+              }`}
+            >
+              <span
+                className="w-4 h-4 rounded-full shrink-0 border border-slate-300 shadow-sm"
+                style={{ backgroundColor: p.color }}
+              />
+              <span className="text-[11px] truncate flex-1">{p.name}</span>
+              {isSelected && <Check className="w-3.5 h-3.5 text-blue-600 shrink-0" />}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Rainbow Hue Slider in RightSetter */}
+      <div className="space-y-1.5 pt-2 border-t border-blue-200/50">
+        <div className="flex items-center justify-between">
+          <span className="text-[10px] font-bold text-slate-600">
+            🌈 自由色相滑块（拖动实时调色）
+          </span>
+          <span className="text-[10px] text-slate-500 font-mono">{localHsl.h}°</span>
+        </div>
+        <input
+          type="range"
+          min="0"
+          max="360"
+          step="1"
+          value={localHsl.h}
+          onChange={(e) => handleHuePreview(Number(e.target.value))}
+          onPointerUp={() => handleCommitColor(localColor)}
+          onMouseUp={() => handleCommitColor(localColor)}
+          onTouchEnd={() => handleCommitColor(localColor)}
+          className="w-full h-2.5 rounded-lg appearance-none cursor-pointer accent-blue-600"
+          style={{
+            background: 'linear-gradient(to right, #ef4444 0%, #f59e0b 17%, #eab308 33%, #10b981 50%, #06b6d4 67%, #3b82f6 83%, #ec4899 92%, #ef4444 100%)'
+          }}
+        />
+
+        <div className="grid grid-cols-4 gap-1 pt-1">
+          {[
+            { label: '深色', l: 30, s: 85 },
+            { label: '主色', l: 45, s: 85 },
+            { label: '明亮', l: 58, s: 80 },
+            { label: '浅亮', l: 72, s: 75 }
+          ].map((tone) => {
+            const toneHex = hslToHex(localHsl.h, tone.s, tone.l);
+            return (
+              <button
+                key={tone.label}
+                type="button"
+                onClick={() => handleToneSelect(tone.l, tone.s)}
+                className="py-1 px-1 rounded bg-white border border-slate-200 hover:border-blue-300 text-[10px] text-slate-600 flex items-center justify-center gap-1 transition-all cursor-pointer"
+              >
+                <span
+                  className="w-2.5 h-2.5 rounded-full shrink-0 border border-slate-200"
+                  style={{ backgroundColor: toneHex }}
+                />
+                <span>{tone.label}</span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      <div className="pt-2 border-t border-blue-200/50 flex items-center justify-between gap-2">
+        <span className="text-[11px] text-slate-600">精准自定义：</span>
+        <div className="flex items-center gap-1.5">
+          <input
+            type="color"
+            value={localColor.startsWith('#') && localColor.length === 7 ? localColor : '#1e3a8a'}
+            onChange={(e) => handlePreviewColor(e.target.value)}
+            onBlur={() => handleCommitColor(localColor)}
+            className="w-7 h-7 rounded border border-slate-300 cursor-pointer p-0.5 bg-white"
+          />
+          <input
+            type="text"
+            value={localColor}
+            onChange={(e) => {
+              const val = e.target.value.trim();
+              setLocalColor(val);
+              if (/^#[0-9A-Fa-f]{6}$/.test(val)) {
+                handlePreviewColor(val);
+              }
+            }}
+            onBlur={() => {
+              if (/^#[0-9A-Fa-f]{6}$/.test(localColor)) {
+                handleCommitColor(localColor);
+              }
+            }}
+            className="w-24 px-2 py-1 bg-white border border-slate-300 rounded text-[11px] text-slate-800 font-mono focus:outline-none focus:border-blue-500 text-center"
+          />
+        </div>
+      </div>
+    </div>
+  );
+};
 
 interface RightSetterProps {
   width: number;
@@ -45,10 +224,12 @@ export const RightSetter: React.FC<RightSetterProps> = ({
     toggleFormatPainter,
     alignWidgets,
     schema,
+    setSchema,
     batchUpdateWidgetCss,
     updatePagePadding
   } = useLegoDesignerStore();
-  const { setUserInput } = useResumeStore();
+  const { setUserInput, templateOptions, setTemplateOptions } = useResumeStore();
+  const [photoDialogOpen, setPhotoDialogOpen] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const editorRef = useRef<HTMLDivElement | null>(null);
@@ -374,6 +555,12 @@ export const RightSetter: React.FC<RightSetterProps> = ({
 
   if (!selectedWidgetId || !selectedWidget) {
     const pagePadding = schema?.css?.pagePadding || { top: 0, right: 0, bottom: 0, left: 0 };
+    const currentThemeColor = (schema?.css as Record<string, unknown>)?.themeColor as string || templateOptions.themeColor || '#1e3a8a';
+    const existingAvatar = schema?.componentsTree?.[0]?.children?.find(
+      (w) => w.componentName.startsWith('hj-avatar') || w.id.includes('avatar') || (w.title || '').includes('头像') || (w.title || '').includes('照片')
+    );
+    const avatarSrc = (existingAvatar?.dataSource?.avatarSrc as string) || (existingAvatar?.dataSource?.src as string) || '';
+
     return (
       <div
         className="h-full bg-white border-l border-slate-200 flex flex-col select-none shrink-0 relative overflow-hidden transition-all"
@@ -388,20 +575,55 @@ export const RightSetter: React.FC<RightSetterProps> = ({
             <ChevronRight className="w-4 h-4" />
           </button>
           <h3 className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
-            <SlidersHorizontal className="w-3.5 h-3.5 text-indigo-600" /> 页面设置
+            <SlidersHorizontal className="w-3.5 h-3.5 text-indigo-600" /> 页面全局设置
           </h3>
         </div>
 
         <div className="flex-1 overflow-y-auto p-4 space-y-5 text-xs">
-          <div className="flex flex-col items-center text-center pt-2 pb-3">
-            <div className="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center text-slate-400 mb-2">
-              <Palette className="w-5 h-5" />
+          {/* 1. Theme Color Palette Section */}
+          <RightSetterThemeSection
+            schema={schema}
+            setSchema={setSchema}
+            currentThemeColor={currentThemeColor}
+            setTemplateOptions={setTemplateOptions}
+          />
+
+          {/* 2. Photo / Avatar Management Card */}
+          <div className="space-y-3 p-3 bg-emerald-50/50 border border-emerald-200/60 rounded-xl shadow-sm">
+            <div className="flex items-center justify-between">
+              <label className="font-bold text-slate-800 flex items-center gap-1.5 text-xs">
+                <Camera className="w-4 h-4 text-emerald-600" /> 证件照 / 个人形象照
+              </label>
+              <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${existingAvatar ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
+                {existingAvatar ? '画布已包含' : '未添加'}
+              </span>
             </div>
-            <h4 className="text-sm font-semibold text-slate-700 mb-0.5">未选中积木</h4>
-            <p className="text-[11px] text-slate-400">点击画布积木模块配置属性，或在此调整页面间距。</p>
+
+            <div className="flex items-center gap-3 pt-1">
+              <div className="w-14 h-16 bg-white border border-slate-200 rounded-lg overflow-hidden flex items-center justify-center shrink-0 shadow-inner">
+                {avatarSrc ? (
+                  <img src={avatarSrc} alt="Avatar" className="w-full h-full object-cover" />
+                ) : (
+                  <User className="w-6 h-6 text-slate-300" />
+                )}
+              </div>
+              <div className="flex-1 space-y-1.5">
+                <button
+                  type="button"
+                  onClick={() => setPhotoDialogOpen(true)}
+                  className="w-full py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold flex items-center justify-center gap-1.5 shadow-md shadow-emerald-600/20 transition-all cursor-pointer"
+                >
+                  <Camera className="w-3.5 h-3.5" />
+                  {existingAvatar ? '更换 / 管理照片' : '添加形象照到画布'}
+                </button>
+                <p className="text-[10px] text-slate-500">
+                  支持 1寸/2寸 规格、圆形/圆角/六边形自由切换。
+                </p>
+              </div>
+            </div>
           </div>
 
-          {/* Page Padding / Margin Controls */}
+          {/* 3. Page Padding / Margin Controls */}
           <div className="space-y-2.5 p-3 bg-indigo-50/50 border border-indigo-200/60 rounded-xl">
             <label className="font-bold text-slate-800 flex items-center gap-1.5 text-xs">
               <SlidersHorizontal className="w-4 h-4 text-indigo-600" /> 页面间距 / 留白 (Padding)
@@ -452,6 +674,7 @@ export const RightSetter: React.FC<RightSetterProps> = ({
             </div>
           </div>
         </div>
+        <PhotoManagerDialog open={photoDialogOpen} onClose={() => setPhotoDialogOpen(false)} />
       </div>
     );
   }
@@ -542,17 +765,26 @@ export const RightSetter: React.FC<RightSetterProps> = ({
 
                 <button
                   type="button"
-                  className="w-full py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-bold flex items-center justify-center gap-1.5 shadow-md shadow-blue-500/20 transition-all active:scale-95"
+                  className="w-full py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-bold flex items-center justify-center gap-1.5 shadow-md shadow-blue-500/20 transition-all active:scale-95 cursor-pointer"
                   onClick={() => fileInputRef.current?.click()}
                 >
                   <Upload className="w-4 h-4" />
                   {currentImageSrc ? '更换本地照片' : '上传本地照片'}
                 </button>
 
+                <button
+                  type="button"
+                  className="w-full py-1.5 bg-white hover:bg-blue-50 text-blue-700 border border-blue-300 rounded-lg text-xs font-semibold flex items-center justify-center gap-1 transition-colors cursor-pointer"
+                  onClick={() => setPhotoDialogOpen(true)}
+                >
+                  <Camera className="w-3.5 h-3.5" />
+                  高级规格与形状管理
+                </button>
+
                 {currentImageSrc && (
                   <button
                     type="button"
-                    className="w-full py-1 text-[11px] text-rose-600 hover:bg-rose-100 rounded-md text-center flex items-center justify-center gap-1 transition-colors"
+                    className="w-full py-1 text-[11px] text-rose-600 hover:bg-rose-100 rounded-md text-center flex items-center justify-center gap-1 transition-colors cursor-pointer"
                     onClick={handleRemoveAvatar}
                   >
                     <Trash2 className="w-3 h-3" />
@@ -561,9 +793,49 @@ export const RightSetter: React.FC<RightSetterProps> = ({
                 )}
               </div>
             </div>
-            <p className="text-[10px] text-slate-500 leading-tight">
-              支持选择高清 PNG/JPG 免冠照或职业照，实时原图保真渲染。
-            </p>
+
+            {/* Quick Shape Presets */}
+            <div className="space-y-1 pt-1 border-t border-blue-200/50">
+              <span className="text-[10px] text-slate-500 font-medium block">快捷形状切换:</span>
+              <div className="grid grid-cols-4 gap-1">
+                <button
+                  type="button"
+                  onClick={() => {
+                    updateWidgetCss(selectedWidget.id, { borderRadius: 50 });
+                  }}
+                  className="py-1 px-1.5 bg-white hover:bg-blue-50 border border-slate-200 rounded text-[10px] text-slate-700 text-center font-medium cursor-pointer"
+                >
+                  🟡 圆形
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    updateWidgetCss(selectedWidget.id, { borderRadius: 8 });
+                  }}
+                  className="py-1 px-1.5 bg-white hover:bg-blue-50 border border-slate-200 rounded text-[10px] text-slate-700 text-center font-medium cursor-pointer"
+                >
+                  🔲 圆角
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    updateWidgetCss(selectedWidget.id, { borderRadius: 2 });
+                  }}
+                  className="py-1 px-1.5 bg-white hover:bg-blue-50 border border-slate-200 rounded text-[10px] text-slate-700 text-center font-medium cursor-pointer"
+                >
+                  ⬛ 方形
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    updateWidgetCss(selectedWidget.id, { width: 85, height: 115, borderRadius: 6 });
+                  }}
+                  className="py-1 px-1.5 bg-white hover:bg-blue-50 border border-slate-200 rounded text-[10px] text-slate-700 text-center font-medium cursor-pointer"
+                >
+                  1寸照
+                </button>
+              </div>
+            </div>
           </div>
         )}
 

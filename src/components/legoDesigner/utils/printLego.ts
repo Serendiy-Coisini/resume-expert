@@ -100,6 +100,14 @@ export function printLegoCanvas() {
           #lego-canvas-page * {
             box-sizing: border-box;
           }
+          #lego-canvas-page img {
+            width: 100% !important;
+            height: 100% !important;
+            object-fit: cover !important;
+            display: block !important;
+            max-width: 100% !important;
+            max-height: 100% !important;
+          }
           [data-canvas-ui="true"],
           [data-page-break-indicator="true"],
           .page-break-indicator-ui,
@@ -120,12 +128,52 @@ export function printLegoCanvas() {
   `);
   doc.close();
 
-  // Trigger print after styles load
-  setTimeout(() => {
-    iframe.contentWindow?.focus();
-    iframe.contentWindow?.print();
+  // Wait for images and fonts to fully load before triggering print
+  let printTriggered = false;
+  const triggerPrint = async () => {
+    if (printTriggered) return;
+    printTriggered = true;
+
+    try {
+      const iframeDoc = iframe.contentWindow?.document;
+      if (iframeDoc) {
+        if (iframeDoc.fonts) {
+          await iframeDoc.fonts.ready;
+        }
+        const imgs = Array.from(iframeDoc.querySelectorAll('img'));
+        await Promise.all(
+          imgs.map((img) => {
+            if (img.complete) return Promise.resolve();
+            return new Promise<void>((resolve) => {
+              img.onload = () => resolve();
+              img.onerror = () => resolve();
+              if ('decode' in img) {
+                img.decode().then(resolve).catch(resolve);
+              }
+            });
+          })
+        );
+      }
+    } catch (err) {
+      console.warn('等待打印资源加载异常：', err);
+    }
+
     setTimeout(() => {
-      document.body.removeChild(iframe);
-    }, 1000);
-  }, 400);
+      iframe.contentWindow?.focus();
+      iframe.contentWindow?.print();
+      setTimeout(() => {
+        if (document.body.contains(iframe)) {
+          document.body.removeChild(iframe);
+        }
+      }, 3000);
+    }, 350);
+  };
+
+  // Ensure iframe content window is loaded
+  if (iframe.contentWindow) {
+    iframe.contentWindow.onload = () => {
+      triggerPrint();
+    };
+    setTimeout(triggerPrint, 600);
+  }
 }

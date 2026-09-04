@@ -30,7 +30,7 @@ export function ResumeTemplateView({ resume, templateId }: ResumeTemplateViewPro
       )}
       <div className="w-full overflow-x-auto touch-pan-x">
         <iframe
-          key={`${templateId}-${JSON.stringify(templateOptions)}`}
+          key={`${templateId}-${JSON.stringify(templateOptions)}-${resume?.personalInfo?.avatarUrl || "no-avatar"}-${resume?.personalInfo?.name || ""}`}
           srcDoc={compiledHTML}
           title="Resume Template Live Preview"
           className="w-full min-w-[720px] md:min-w-full min-h-[1050px] border-0 bg-white"
