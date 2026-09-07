@@ -105,7 +105,7 @@ npm install
 npm run dev
 ```
 
-在浏览器中打开 [http://localhost:3000](http://localhost:3000) 即可访问应用。
+在浏览器中打开 [http://localhost:3100](http://localhost:3100) 即可访问应用。
 
 ---
 

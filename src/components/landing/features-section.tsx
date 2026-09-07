@@ -1,7 +1,13 @@
-import { Brain, Target, MessageSquareCode, FileUp, Sparkles, LayoutGrid } from "lucide-react";
+import { Brain, Target, MessageSquareCode, Sparkles, LayoutGrid, Stethoscope } from "lucide-react";
 
 export function FeaturesSection() {
   const features = [
+    {
+      icon: Stethoscope,
+      color: "text-teal-400 bg-teal-500/15 border-teal-500/30",
+      title: "🩺 医学生保研专属重构",
+      desc: "针对保研拟录取后联系导师、专硕规培与学硕科研差异化定位、个人陈述 PARE 重塑与进组面试预测。",
+    },
     {
       icon: Target,
       color: "text-blue-400 bg-blue-500/15 border-blue-500/30",
@@ -25,12 +31,6 @@ export function FeaturesSection() {
       color: "text-amber-400 bg-amber-500/15 border-amber-500/30",
       title: "STAR 法则一键重构",
       desc: "遵循 Situation-Task-Action-Result 法则，自动改写提炼高质量专业 Bullet。",
-    },
-    {
-      icon: FileUp,
-      color: "text-emerald-400 bg-emerald-500/15 border-emerald-500/30",
-      title: "高清 PDF / Word 导出",
-      desc: "支持服务端原生矢量渲染，一键保存矢量 PDF 或编辑版 Word 格式。",
     },
     {
       icon: LayoutGrid,

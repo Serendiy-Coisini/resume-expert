@@ -10,7 +10,7 @@ echo.
 echo Launching local server and opening browser...
 echo.
 
-start "" "http://localhost:3000"
+start "" "http://localhost:3100"
 
 call npm run dev
 
