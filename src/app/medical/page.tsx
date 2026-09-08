@@ -55,7 +55,6 @@ import { Textarea } from "@/components/ui/textarea";
 import { useMedicalStore } from "@/store/medical-store";
 import { useAIConfigStore } from "@/store/ai-config-store";
 import { MEDICAL_PRESETS } from "@/lib/medical-presets";
-import { enrichMedicalResult } from "@/lib/medical-enricher";
 import { runMedicalAnalysis } from "@/services/ai/medicalAgent";
 import { copyToClipboard, delay } from "@/lib/utils";
 import {
@@ -196,53 +195,8 @@ export default function MedicalPage() {
     }
   }, [analysisResult, activeTab, setActiveTab]);
 
-  useEffect(() => {
-    if (!analysisResult) return;
-
-    const needsQuestionFix =
-      !analysisResult.labInterviewPrep?.questions ||
-      analysisResult.labInterviewPrep.questions.length === 0 ||
-      !analysisResult.labInterviewPrep?.defenseSlideFramework ||
-      analysisResult.labInterviewPrep.defenseSlideFramework.length === 0;
-
-    const firstSubj = analysisResult.mentorEmail?.subjectOptions?.[0]?.subject || "";
-    const bodyText = analysisResult.mentorEmail?.bodyText || "";
-    const firstSecOriginal = analysisResult.psDiagnosis?.sections?.[0]?.originalText || "";
-
-    const userTypedName = medicalInput.name?.trim();
-    const hasPresetNameLeak =
-      (firstSubj.includes("周思敏") && userTypedName !== "周思敏") ||
-      (firstSubj.includes("中大公卫") && !medicalInput.undergradSchool?.includes("中山大学")) ||
-      (bodyText.includes("周思敏") && userTypedName !== "周思敏") ||
-      Boolean(userTypedName && !firstSubj.includes(userTypedName));
-
-    const userTypedPS = medicalInput.originalPS?.trim();
-    const hasPSMismatch =
-      Boolean(userTypedPS && userTypedPS.length > 20 && !firstSecOriginal.includes(userTypedPS.slice(0, 15)));
-
-    const userTypedResume = medicalInput.originalResume?.trim();
-    const firstQuestionText = analysisResult.labInterviewPrep?.questions?.[0]?.question || "";
-    const firstIntroText = analysisResult.labInterviewPrep?.selfIntroductions?.[0]?.speechText || "";
-    const firstEngIntroText = analysisResult.labInterviewPrep?.englishSelfIntro?.englishText || "";
-    const hasResumeLeak = Boolean(
-      userTypedResume &&
-      userTypedResume.length > 10 &&
-      !userTypedResume.includes("2.4 万") &&
-      !userTypedResume.includes("24,000") &&
-      (
-        firstQuestionText.includes("2.4 万人") ||
-        firstIntroText.includes("2.4 万人") ||
-        firstEngIntroText.includes("24,000") ||
-        firstIntroText.includes("【科研经历】") ||
-        firstQuestionText.includes("【科研经历】")
-      )
-    );
-
-    if (needsQuestionFix || hasPresetNameLeak || hasPSMismatch || hasResumeLeak) {
-      const enriched = enrichMedicalResult(analysisResult, medicalInput);
-      setAnalysisResult(enriched);
-    }
-  }, [analysisResult, medicalInput, setAnalysisResult]);
+  // Note: analysisResult enrichment is handled deterministically in onRehydrateStorage and setAnalysisResult in medical-store.ts,
+  // preventing any recursive setState loops (React Error #185).
 
   const handleCopy = async (text: string, type: string) => {
     const ok = await copyToClipboard(text);
