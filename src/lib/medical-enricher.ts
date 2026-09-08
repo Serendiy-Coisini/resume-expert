@@ -4,12 +4,16 @@ import type {
   SelfIntroVersion,
   EnglishSelfIntro,
   EnhancedInterviewQuestion,
+  PSDiagnosis,
+  StructuredPSSection,
+  MedicalCVItem,
+  MedicalFinalResume,
+  MentorEmailDraft,
+  DefenseSlideItem,
+  EnglishLiteratureDefense,
+  MedicalResearchProject,
+  MedicalClinicalExperience,
 } from "@/types/medical";
-import {
-  PRESET_ACADEMIC_MASTER,
-  PRESET_CLINICAL_MASTER,
-  PRESET_PREVENTIVE_PUBLIC_HEALTH,
-} from "./medical-presets";
 
 function replaceAllTokens(text: string, input: Partial<MedicalUserInput>): string {
   if (!text) return text;
@@ -539,425 +543,656 @@ function buildResumeBasedQuestions(
   ];
 }
 
+export function buildDynamicPSDiagnosis(
+  input: Partial<MedicalUserInput> = {},
+  details: ExtractedResumeDetails
+): PSDiagnosis {
+  const applicantName = input.name?.trim() || "推免申请人";
+  const school = input.undergradSchool?.trim() || "本科院校";
+  const major = input.major?.trim() || "医学专业";
+  const gpaRank = input.gpaRank?.trim() || "推免综合排名前列";
+  const englishLevel = input.englishLevel?.trim() || "大学英语六级良好";
+  const targetUniv = input.targetUniversity?.trim() || input.targetHospital?.trim() || "目标院校";
+  const mentorTitle = input.mentorName?.trim()
+    ? (input.mentorName.includes("教授") || input.mentorName.includes("老师") || input.mentorName.includes("主任")
+      ? input.mentorName.trim()
+      : `${input.mentorName.trim()}教授`)
+    : "导师课题组";
+  const mentorDir = [input.targetHospital, input.targetDepartment, input.mentorResearchDirection]
+    .filter(Boolean)
+    .join(" · ") || "医学前沿攻坚方向";
+
+  const primaryProject = details.primaryProject;
+  const primaryMethods = details.primaryMethods;
+  const primaryClinical = details.primaryClinical;
+  const toolsStr = details.skillItems.slice(0, 4).join("、") || "医学统计分析与科学偏倚控制";
+
+  const rawParas = ((input.originalPS || "").trim())
+    .split(/\n\s*\n|\n/)
+    .map((p) => p.trim())
+    .filter((p) => p.length > 0);
+
+  const sections: StructuredPSSection[] = [
+    {
+      sectionName: "第一部分：学术初心与专业追求 (Problem & Mission)",
+      sectionTitle: "学术初心与专业基石：从感性情怀向严谨科学思辨的跨越",
+      originalText:
+        rawParas[0] ||
+        `我是来自${school}${major}的${applicantName}。本科阶段我刻苦学习，推免成绩为${gpaRank}，并通过${englishLevel}。我一直热爱医学，希望在推免中进入高水平学术团队继续深造。`,
+      optimizedText: `我本科就读于${school}${major}。在扎实的专业学习与前沿文献研读中，我深刻认识到医学不仅是守卫生命健康的崇高事业，更是一门高度依赖客观证据、严密因果归因与方法学质控的严谨科学。本科前四年，我的推免综合排名为【${gpaRank}】，并通过了【${englishLevel}】，系统构筑起涵盖基础医学、专业主干课与统计分析的扎实学科底座。我不满足于教科书知识的记忆，而是始终关注重大健康问题背后的病因学机制与临床/人群转化价值，立志将严密的科学探究作为毕生追求。`,
+      reason:
+        "打破传统空洞的泛泛抒情与流水账罗列，直接以硬核学业绩点与科学探索内驱力破题，凸显扎实过硬的学术基本盘。",
+      mentorFocusPoint:
+        "考查推免生是否具备坚实全面的医学专业知识底座，以及从‘被动应试’向‘主动科学探究’蜕变的自驱意识。",
+    },
+    {
+      sectionName: "第二部分：核心科研攻坚与方法学实操 (Action & Methodology)",
+      sectionTitle: "核心科研攻坚：从被动执行到掌握方法学质控与独立排障",
+      originalText:
+        rawParas[1] ||
+        `在校期间我参加了【${primaryProject}】的科研工作，负责查阅文献与整理数据，学习了${toolsStr}，完成了一定的科研训练。`,
+      optimizedText: `在核心科研实践中，我拒绝形式化的走马观花，深度参与了【${primaryProject}】的攻关全过程。在该课题中，我作为核心执行骨干，重点推进【${primaryMethods}】。面对多源异构数据与复杂的分析需求，我熟练运用【${toolsStr}】等专业工具，建立起严密的数据清洗流线与变量质控标准。针对潜在的选择偏倚、测量误差与多因素残余混杂，我严格依照高水平医学顶刊的方法学规范，开展了多模型校正与系统性敏感性检验，确保推断结论的客观与稳健。这段科研攻坚淬炼了我‘求真求确’的严谨学风和应对复杂科研瓶颈的独立排障能力。`,
+      reason:
+        "摒弃空泛的项目列举，深入科研实战核心，详述个人在方法学推进、数据质控与偏倚排查中的实质贡献，树立核心科研骨干形象。",
+      mentorFocusPoint:
+        "导师最为看重推免生是‘挂名工具人’还是真正亲手实操并深刻领会统计推断/实验原理的科研生力军。",
+    },
+    {
+      sectionName: "第三部分：临床轮转与现场实践实务 (Result & Evidence)",
+      sectionTitle: "知行合一：在临床一线与现场实践中淬炼循证医学思维",
+      originalText:
+        rawParas[2] ||
+        `在实践阶段，我在【${primaryClinical}】参加了一线轮转，认真跟随带教老师查房、整理病历和观摩学习，收获很大。`,
+      optimizedText: `在实践历练阶段，我在【${primaryClinical}】完成了深入扎实的一线轮转。面对真实复杂的业务场景与患者需求，我时刻坚持‘循证决策第一、质量规范第一’，严格执行标准化病程记录、数据核查与操作规程。在带教老师悉心指导下，我深入参与典型案例与疑难问题研讨，深刻领会了‘从临床/现场发掘真问题，再以科学研究反哺一线干预’的转化闭环，极大地培养了我的临床循证批判性思辨、跨团队协同协作能力与高度的职业敬畏感。`,
+      reason:
+        "将原本日常的‘见习观摩流水账’提炼升华至遵循循证医学指南、具备敏锐问题发掘与团队协作抗压的高级职业素养。",
+      mentorFocusPoint:
+        "考查推免生在真实医疗/现场复杂高压环境下的操作规范性、人际沟通情商与解决实际问题的综合胜任力。",
+    },
+    {
+      sectionName: "第四部分：读研规划与学术抱负 (Evaluation & Vision)",
+      sectionTitle: "学术展望：对齐导师前沿课题，以方法学优势服务重大医学攻关",
+      originalText:
+        rawParas[3] ||
+        `我非常渴望推免到【${targetUniv}】${mentorTitle}的课题组。如果能够录取，我一定认真服从老师安排，努力多读文献多做实验，争取早日毕业。`,
+      optimizedText: `【${targetUniv}】拥有国家级医学科研高地与开放包容的浓厚学风，一直是我向往的学术圣地。${mentorTitle}团队在【${mentorDir}】领域的代表性探索与深厚学术造诣令我由衷钦佩。若有幸通过考核入组深造，我规划在读研期间，充分依托本科在【${toolsStr}】与【${primaryProject}】中沉淀的方法学与数据处理优势，深度融入课题组攻关主线；在老师悉心指引下，锚定学科前沿与重大疾病关键科学问题迎难而上，尽早完成高质量开题，争取产出经得起国际同行与时间检验的高水平原创学术成果！`,
+      reason:
+        "坚决剔除‘听话服从’等被动被催熟心态，换位思考导师招生痛点，展现目标明确、技能对齐、有备而来的学者型培养潜质。",
+      mentorFocusPoint:
+        "评估考生的学术志向成熟度、未来开题可行性，以及能否与课题组现有重大项目平台实现‘无缝即时对接’。",
+    },
+  ];
+
+  const fullOptimizedPS = sections.map((s) => s.optimizedText).join("\n\n");
+
+  return {
+    overallScore: 68,
+    dimensionScores: [
+      {
+        dimension: "学术初心与科学思维",
+        score: 72,
+        comment: `已结合${school}${major}背景由浅入深展开，立意严谨，展现真诚清晰的科研动机。`,
+      },
+      {
+        dimension: "方法学实操与证据链",
+        score: 66,
+        comment: `突出【${primaryProject.slice(0, 15)}】攻坚与【${toolsStr}】工具链，量化质控细节与偏倚排查逻辑。`,
+      },
+      {
+        dimension: "实践素养与抗压韧性",
+        score: 69,
+        comment: `在【${primaryClinical.slice(0, 15)}】轮转中提炼循证医学思辨与一线责任感，职业素养成熟。`,
+      },
+      {
+        dimension: "导师对齐与未来规划",
+        score: 65,
+        comment: `精准锚定【${targetUniv}】与【${mentorTitle}】在【${mentorDir.slice(0, 18)}】方向，可行性强。`,
+      },
+    ],
+    mainIssues: [
+      `原陈述对核心科研课题【${primaryProject.slice(0, 16)}】的方法学描述较泛，缺乏具体的数据质控指标与偏倚检验细节；`,
+      "对临床/现场一线实践的感悟偏于感性观摩，未充分凸显循证医学批判性思维与转化价值；",
+      `读研规划部分需要更紧密贴合【${targetUniv}】与【${mentorTitle}】课题组的攻关前沿，展现即战力。`,
+    ],
+    strengths: [
+      `学业指标扎实过硬（${school} · ${major} · 排名：${gpaRank} · ${englishLevel}），具备坚实的基础学科底盘；`,
+      `具备真实课题【${primaryProject.slice(0, 18)}】的深入攻坚经历，熟练掌握【${toolsStr}】等专业工具；`,
+      `在一线【${primaryClinical.slice(0, 16)}】历练中积累了扎实的循证实践思维，展现了优秀的学术严谨性与抗压韧性。`,
+    ],
+    prioritySuggestions: [
+      "全文严格遵循 PARE（问题-行动-结果-评价）学术叙事架构，以实打实的方法学证据链为核心驱动；",
+      `在科研段落中着力展现【${toolsStr}】实操中的偏倚控制、变量清洗与敏感性验证，树立独立攻坚学术形象；`,
+      `读研规划紧扣【${mentorTitle}】代表作与课题布局，清晰陈述个人专业优势与课题组攻关方向的结合点。`,
+    ],
+    sections,
+    fullOptimizedPS,
+  };
+}
+
+export function buildDynamicCVOptimization(
+  input: Partial<MedicalUserInput> = {},
+  details: ExtractedResumeDetails
+): { optimizedItems: MedicalCVItem[]; finalMedicalResume: MedicalFinalResume } {
+  const applicantName = input.name?.trim() || "推免申请人";
+  const school = input.undergradSchool?.trim() || "本科院校";
+  const major = input.major?.trim() || "医学专业";
+  const gpaRank = input.gpaRank?.trim() || "推免综合排名前列";
+  const englishLevel = input.englishLevel?.trim() || "大学英语六级良好";
+  const targetUniv = input.targetUniversity?.trim() || input.targetHospital?.trim() || "目标院校";
+  const mentorTitle = input.mentorName?.trim()
+    ? (input.mentorName.includes("教授") || input.mentorName.includes("老师") ? input.mentorName.trim() : `${input.mentorName.trim()}教授`)
+    : "";
+  const primaryProject = details.primaryProject;
+  const primaryMethods = details.primaryMethods;
+  const primaryClinical = details.primaryClinical;
+  const toolsStr = details.skillItems.slice(0, 4).join("、") || "医学统计分析、数据质控、R语言";
+
+  const academicSummary = `${school} ${major} 推免生（综合排名：${gpaRank}，${englishLevel}）。本科期间深度参与【${primaryProject}】等核心科研课题，熟练掌握【${toolsStr}】等专业工具，具备扎实的数据清洗、多模型统计推断与偏倚质控实战能力；在【${primaryClinical}】完成系统一线实践轮转，筑牢严谨的循证医学思维、良好的跨团队协作沟通与高抗压科研学术自驱力。`;
+
+  const optimizedItems: MedicalCVItem[] = [
+    {
+      id: "cv-item-1",
+      section: "核心科研经历：项目描述与方法学量化",
+      before: `参与课题【${primaryProject}】，负责整理查阅文献，处理相关数据。`,
+      after: `作为核心骨干深度参与【${primaryProject}】，主导推进【${primaryMethods}】；熟练运用【${toolsStr}】建立标准化数据清洗与质控流程，系统排查选择偏倚与混杂效应，执行多模型校正与敏感性检验，确保推论结论真实稳健。`,
+      reason:
+        "摒弃‘参与/协助’等被动弱动词，以主导动词与具体方法学工具链重构，量化个人核心攻坚成果与质控细节。",
+      academicStandardTip:
+        "医学学术规范要求：以强动词（主导/设计/构建）开头，明确列出样本规模、核心算法及偏倚控制策略。",
+    },
+    {
+      id: "cv-item-2",
+      section: "专业技能树：数据分析与实验技术精细化标注",
+      before: "熟悉常用医学统计学分析软件，具备文献检索和阅读能力。",
+      after: `熟练掌握【${toolsStr}】等专业工具，可独立开展复杂数据清洗、多因素回归、广义加性模型、敏感性分析及顶刊级统计可视化；具备流畅精读专业英文医学顶刊与综述撰写能力。`,
+      reason:
+        "将模棱两可的‘熟悉软件’细化为能够‘独立排障’的具体分析技能与应用场景，直接击中导师实验室日常科研痛点。",
+      academicStandardTip:
+        "导师筛选简历重点考察‘免培训即战力’，技能项需精确到具体算法模型与独立排障实操层面。",
+    },
+    {
+      id: "cv-item-3",
+      section: "实践/临床轮转经历：从观摩到循证医学转化",
+      before: `在【${primaryClinical}】实习轮转，跟随老师日常查房和打杂。`,
+      after: `在【${primaryClinical}】完成一线规范化轮转，恪守医疗/流调核心质控安全规程；严谨参与真实案例研讨与关键数据核查，深化循证决策思辨，展现扎实严谨的职业素养与团队协同力。`,
+      reason:
+        "剔除‘打杂/观摩’等自我矮化措辞，从医疗质量、标准化规范与循证批判性思辨维度凸显临床胜任力。",
+      academicStandardTip:
+        "医学推免评审严查实践含金量，重点强调标准化规范（SOP）执行意识与循证思辨素养。",
+    },
+    {
+      id: "cv-item-4",
+      section: "学业素养与推免资格：客观硬指标背书",
+      before: "专业基础扎实，成绩优异，多次获得奖学金，英语流利。",
+      after: `推免综合成绩排名【${gpaRank}】，通过【${englishLevel}】；系统研读国内外医学前沿论著，具备优秀的学术逻辑思辨与严谨求实的学风底色。`,
+      reason:
+        "以客观无可争议的学分绩点排位与外语证书取代自夸式形容词，瞬间建立学霸第一印象与学术信任感。",
+      academicStandardTip:
+        "学术简历的第一行需通过量化排名与外语硬核指标实现 3 秒吸睛，奠定坚实学术底座。",
+    },
+  ];
+
+  // Build research projects for CV
+  const researchProjects: MedicalResearchProject[] =
+    details.researchProjects.length > 0
+      ? details.researchProjects.map((p, idx) => ({
+          title: p.title,
+          role: idx === 0 ? "项目主要完成人 / 核心骨干" : "团队成员 / 统计分析参与者",
+          period: "本科攻读期间",
+          mentor: school || "本科科研团队",
+          bullets:
+            p.bullets.length > 0
+              ? p.bullets.map((b) => (b.endsWith("；") || b.endsWith("。") ? b : `${b}；`))
+              : [
+                  `负责${p.title}的研究方案落实、数据清洗与质控，运用${toolsStr}展开深入分析；`,
+                  `系统核查选择偏倚与多因素残余混杂，执行稳健性检验保障分析结论可重复。`,
+                ],
+        }))
+      : [
+          {
+            title: primaryProject,
+            role: "核心执行骨干 / 分析推进者",
+            period: "本科攻读期间",
+            mentor: school || "本科科研团队",
+            bullets: [
+              `深入参与课题的技术路线执行与数据采集质控，运用【${toolsStr}】完成结构化数据治理；`,
+              `主导推进【${primaryMethods}】，严格执行多模型校正与敏感性检验，保障研究结果经得起同行重复。`,
+            ],
+          },
+        ];
+
+  // Build clinical experiences for CV
+  const clinicalExperiences: MedicalClinicalExperience[] =
+    details.clinicalItems.length > 0
+      ? details.clinicalItems.map((cTitle) => ({
+          hospital: cTitle.includes("医院") || cTitle.includes("中心") ? cTitle.split(/[，,。\s]/)[0] : (school ? `${school}教学医院` : "医学院附属医院"),
+          department: cTitle.includes("科") ? cTitle : "临床/实务规范化轮转",
+          period: "临床实践阶段",
+          bullets: [
+            `深入一线规范参与${cTitle}日常工作，严格执行医疗文书与质量安全规范；`,
+            `在带教老师指导下参与病例研讨，培养扎实的循证思辨与医患沟通胜任力。`,
+          ],
+        }))
+      : [
+          {
+            hospital: primaryClinical.includes("医院") || primaryClinical.includes("中心") ? primaryClinical.split(/[，,。\s]/)[0] : (school ? `${school}教学医院` : "医学院附属医院"),
+            department: primaryClinical.includes("科") ? primaryClinical : "临床/实务规范化轮转",
+            period: "临床实践阶段",
+            bullets: [
+              `深入一线扎实轮转，规范化书写文书并严谨核对关键指标，守牢医疗质量红线；`,
+              `积极参与带教查房与疑难案例讨论，深化循证医学理解并提升团队协作抗压能力。`,
+            ],
+          },
+        ];
+
+  const finalMedicalResume: MedicalFinalResume = {
+    personalInfo: {
+      name: applicantName,
+      undergradSchool: school,
+      major,
+      gpaRank,
+      englishLevel,
+      phone: input.phone?.trim() || "",
+      email: input.email?.trim() || "",
+      targetTrack: input.track || "preventive-public-health",
+      targetIntent: mentorTitle
+        ? `意向导师：${mentorTitle}${targetUniv ? ` · ${targetUniv}` : ""}`
+        : targetUniv
+        ? `目标院校：${targetUniv}`
+        : "",
+      targetUniversity: targetUniv,
+    },
+    academicSummary,
+    labSkills: [
+      {
+        category: "科研方法与统计工具",
+        items: details.skillItems.length > 0 ? details.skillItems : ["医学统计分析", "数据质控与清洗", "R语言/Python", "偏倚排查"],
+      },
+      {
+        category: "专业医学实践与文献能力",
+        items: ["专业英文顶刊精读与综述撰写", "临床规范化文书与医疗质控", "敏感性分析与多模型验证", "循证医学批判性思辨"],
+      },
+    ],
+    researchProjects,
+    publications: [], // Never fabricate fake papers!
+    clinicalExperiences,
+    honorsAndScholarships: [
+      "本科推免学业综合奖学金 / 优秀生表彰",
+      "校级优秀共青团员 / 优秀学生干部",
+      "医学专业技能竞赛 / 科研学术实践表彰",
+    ],
+  };
+
+  return { optimizedItems, finalMedicalResume };
+}
+
+export function buildDynamicMentorEmail(
+  input: Partial<MedicalUserInput> = {},
+  details: ExtractedResumeDetails
+): MentorEmailDraft {
+  const applicantName = input.name?.trim() || "推免申请人";
+  const school = input.undergradSchool?.trim() || "本科院校";
+  const major = input.major?.trim() || "医学专业";
+  const gpaRank = input.gpaRank?.trim() || "推免综合排名前列";
+  const englishLevel = input.englishLevel?.trim() || "大学英语六级良好";
+  const targetUniv = input.targetUniversity?.trim() || input.targetHospital?.trim() || "目标院校";
+  const mentorTitle = input.mentorName?.trim()
+    ? (input.mentorName.includes("教授") || input.mentorName.includes("老师") || input.mentorName.includes("主任")
+      ? input.mentorName.trim()
+      : `${input.mentorName.trim()}教授`)
+    : "意向导师";
+  const mentorShort = mentorTitle.replace(/教授|老师|主任/g, "");
+  const stage = input.applicationStage?.trim() || "推免";
+  const stageTag = stage.includes("自荐") || stage.includes("申请") ? stage : `${stage}自荐`;
+  const paperOrDir = input.mentorKeyPaper?.trim() || input.mentorResearchDirection?.trim() || "课题组科研前沿方向";
+
+  const primaryProject = details.primaryProject;
+  const primaryMethods = details.primaryMethods;
+  const primaryClinical = details.primaryClinical;
+  const toolsStr = details.skillItems.slice(0, 3).join("、") || "专业统计分析与数据质控";
+
+  const subjectOptions = [
+    {
+      style: "学术自驱型 (推荐首选)",
+      subject: `【${stageTag}】${applicantName}（${school} · ${gpaRank}）申请加入${mentorTitle}课题组深造`,
+    },
+    {
+      style: "方法学探讨型",
+      subject: `【${stageTag}】${applicantName}（${school}）拜读${mentorShort}老师${paperOrDir.slice(0, 20)}近作汇报及读研设想`,
+    },
+    {
+      style: "规范严谨型",
+      subject: `【推免生自荐信】${school}${applicantName}（排名：${gpaRank}）申请攻读${targetUniv}研究生`,
+    },
+  ];
+
+  const salutation = `尊敬的${mentorTitle}：`;
+
+  const bodyText = `${salutation}
+您好！非常抱歉在您百忙之中打扰。
+
+我是来自${school}${major}的推免生${applicantName}。我一直密切关注并深入学习您团队在【${paperOrDir.slice(0, 35)}】方向的学术建树。借本次推免选拔契机，我怀着十分诚挚与向往的心情，渴望申请加入您在【${targetUniv}】的课题组攻读研究生学位。
+
+【学术底座与硬核素养】
+本科期间，我始终保持求真务实的学习态度，推免综合排名为【${gpaRank}】，并以高分通过【${englishLevel}】，具备扎实的专业学科基础与流畅阅读研析国际一流顶刊文献的专业外语素养。
+
+【简历核心科研与方法学实战】
+在科研实战中，我拒绝形式化走马观花，深度参与了【${primaryProject}】。在该课题中，我主要承担【${primaryMethods}】攻关，熟练运用【${toolsStr}】等专业工具推进数据治理。针对研究中的偏倚控制与多因素混杂，我严格执行标准化多模型校正与敏感性检验，积累了扎实的方法学实操与排障韧性。这段经历让我深深领会到：严密求实是科学研究不可逾越的生命线。
+
+【一线实践历练与责任意识】
+在实践轮转方面，我在【${primaryClinical}】中完成了深入的一线工作，严谨执行各项规范，培养了从实践中发掘真问题、多学科协同攻坚的循证思维与敬业素养。
+
+【向往理由与读研攻坚设想】
+拜读您团队近年来的代表性论著，深刻体会到您在推动本学科前沿发展与重大疾病机制探索中的卓越造诣。若有幸通过推免选拔进入您的团队，我将充分发挥本科沉淀的方法学与数据分析优势，在您的指引下全心投入科研攻坚，争取早日产出经得起同行严格检验的高水平原创成果！
+
+随信附上我的【个人学术简历】、【成绩单与排名证明】及【科研实践总结】。非常期待能有机会得到您的批评指点与当面/线上汇报交流的机会！
+
+谨祝
+身体健康，工作顺意！
+
+学生：${applicantName} 谨呈
+${school} · ${major}
+联系电话：${input.phone || "见简历附件"} | 电子邮箱：${input.email || "见简历附件"}`;
+
+  const attachmentChecklist = [
+    `1. 本科成绩单与推免专业排名证明（官方盖章件，当前排名：${gpaRank}）`,
+    `2. 规范化个人学术简历（重点呈现【${primaryProject.slice(0, 15)}】攻坚与【${toolsStr}】技能树）`,
+    `3. 英语水平证明（${englishLevel}）及核心专业课优异成绩佐证`,
+    `4. 本科科研实践报告摘要（重点阐释【${primaryMethods.slice(0, 18)}】质控实操细节）`,
+  ];
+
+  const strategyTips = [
+    "发送黄金时段：建议在工作日（周二至周四）早晨 07:30 - 08:30 发送，避开周一例会高峰与周末休息时间；",
+    "正文排版规范：控制在 500~700 字，段落分明，核心推免排名与方法学关键词加粗，便于导师手机秒读；",
+    `附件格式要求：所有附件务必整合转为 PDF，统一命名规范，如“【${applicantName}-推免】本科院校-文件名.pdf”；`,
+    "礼貌回访节奏：若发送后 5~7 个工作日未获回复，可在原邮件基础上礼貌跟进一封汇报（Follow-up），切忌多渠道催促。",
+  ];
+
+  return {
+    subjectOptions,
+    salutation,
+    bodyText,
+    attachmentChecklist,
+    strategyTips,
+  };
+}
+
+export function buildDynamicDefenseSlideFramework(
+  input: Partial<MedicalUserInput> = {},
+  details: ExtractedResumeDetails
+): DefenseSlideItem[] {
+  const applicantName = input.name?.trim() || "推免申请人";
+  const school = input.undergradSchool?.trim() || "本科院校";
+  const major = input.major?.trim() || "医学专业";
+  const gpaRank = input.gpaRank?.trim() || "推免综合排名前列";
+  const englishLevel = input.englishLevel?.trim() || "大学英语六级良好";
+  const targetUniv = input.targetUniversity?.trim() || input.targetHospital?.trim() || "目标院校";
+  const mentorTitle = input.mentorName?.trim()
+    ? (input.mentorName.includes("教授") || input.mentorName.includes("老师") ? input.mentorName.trim() : `${input.mentorName.trim()}教授`)
+    : "导师课题组";
+  const mentorDir = [input.targetHospital, input.targetDepartment, input.mentorResearchDirection]
+    .filter(Boolean)
+    .join(" · ") || "前沿科研攻坚方向";
+
+  const primaryProject = details.primaryProject;
+  const primaryMethods = details.primaryMethods;
+  const primaryClinical = details.primaryClinical;
+  const toolsStr = details.skillItems.slice(0, 3).join("、") || "医学统计分析与偏倚质控";
+
+  return [
+    {
+      slideNumber: 1,
+      title: "学术画像与推免资质 (Academic Profile & Credentials)",
+      timeAllocation: "0:00 - 1:00 (60秒)",
+      contentFocus: "院校专业、推免排位、外语能力与主干课程底座",
+      speakingScript: `各位评审专家、老师好！我是来自${school}${major}的推免生${applicantName}。本科前四年，我的推免综合排名为【${gpaRank}】，并通过了【${englishLevel}】。在校期间系统筑牢了医学基础理论与统计方法学底座，今天非常荣幸向各位老师汇报我的学术历练与未来规划！`,
+      visualAdvice: "以简洁高雅学术蓝/白配色为主，右上方放置专业答辩证件照，以图表化信息卡片呈现 GPA、英语与荣誉指标。",
+    },
+    {
+      slideNumber: 2,
+      title: "核心科研攻坚与方法学实战 (Core Research & Methodology)",
+      timeAllocation: "1:00 - 2:30 (90秒)",
+      contentFocus: `【${primaryProject.slice(0, 20)}】研究设计、方法学质控与个人推进贡献`,
+      speakingScript: `在核心科研方面，我深度参与了【${primaryProject}】。针对该研究的技术难点，我主要推进【${primaryMethods}】，熟练运用【${toolsStr}】开展结构化数据清洗与分析。针对潜在的选择偏倚与残余混杂，我们严密执行多模型校正与敏感性分析，确保推断结论客观稳健。`,
+      visualAdvice: "居中展示课题的技术路线图或方法学执行流线，将个人负责的【质控流程】与【核心算法】用彩色框着重高亮。",
+    },
+    {
+      slideNumber: 3,
+      title: "一线实践胜任力与循证思辨 (Clinical & Field Competency)",
+      timeAllocation: "2:30 - 3:30 (60秒)",
+      contentFocus: `【${primaryClinical.slice(0, 20)}】一线轮转经历与实战转化感悟`,
+      speakingScript: `在实践历练方面，我在【${primaryClinical}】完成了扎实的一线轮转。面对真实复杂的业务场景，我严格恪守标准化操作规程与数据质控红线。在带教老师指导下深入剖析真实案例，深化了对循证医学的理解，锻炼了跨学科团队协同与抗压应变能力。`,
+      visualAdvice: "展示一线实践业务流线图或质控规范核查表，突出恪守医疗/流调安全规范与严谨求实的学风。",
+    },
+    {
+      slideNumber: 4,
+      title: "科研排障韧性与学术诚信反思 (Troubleshooting & Integrity)",
+      timeAllocation: "3:30 - 4:15 (45秒)",
+      contentFocus: `【${primaryProject.slice(0, 16)}】中的异常排查、算法修正与求实态度`,
+      speakingScript: `科研绝非一帆风顺。在处理【${primaryProject}】过程中，我们曾遭遇过异常数据波动瓶颈。我没有急功近利，而是通过回溯底层操作与代码逻辑、补充敏感性检验攻克难关。这次经历让我深刻认识到：真实严谨是青年学者立身之本。`,
+      visualAdvice: "展示排障前后的诊断散点图或决策树比对，突出严谨求真、绝不造假修图的崇高学术品德。",
+    },
+    {
+      slideNumber: 5,
+      title: "读研设想与融入课题组规划 (Research Proposal & Vision)",
+      timeAllocation: "4:15 - 5:00 (45秒)",
+      contentFocus: `对齐【${targetUniv}】及【${mentorTitle}】在【${mentorDir.slice(0, 20)}】的研究布局`,
+      speakingScript: `【${targetUniv}】学术平台卓越，${mentorTitle}团队在【${mentorDir}】方向的代表性建树令我由衷向往。若有幸入组，我计划将本科沉淀的方法学技能与课题组前沿平台深度结合，在老师指导下全力攻坚，争取早日产出原创成果！我的汇报完毕，恳请各位老师批评指正！`,
+      visualAdvice: "展示 1~3 年读研阶段清晰的学术研究规划甘特图，明确个人方法学基础与导师课题组平台的结合路径。",
+    },
+  ];
+}
+
+export function buildDynamicEnglishLiteratureDefense(
+  input: Partial<MedicalUserInput> = {},
+  details: ExtractedResumeDetails
+): EnglishLiteratureDefense {
+  const mentorDir = input.mentorResearchDirection?.trim() || details.primaryProject;
+  const targetUniv = input.targetUniversity?.trim() || "Top Medical Institutions";
+
+  return {
+    articleTitle: `Methodological Advances and Causal Evidence in ${mentorDir.slice(0, 30)}: A Multicenter Study at ${targetUniv}`,
+    journalAndYear: "The Lancet / JAMA Network / BMC Medicine (Recent Advance)",
+    abstractSnippet: `Background: Investigating the underlying causal relationships and mitigating confounding biases remain paramount in modern biomedical research. Methods: Using a rigorous prospective cohort design and robust sensitivity models, we evaluated risk trajectories and long-term outcomes. Findings: After controlling for multiple confounding factors and calculating E-values, significant robust associations were identified. Interpretation: These findings highlight the critical importance of standardized quality control and advanced causal inference in evidence-based translation.`,
+    chineseTranslation: `背景：深入探究潜在因果机制并系统规避混杂偏倚是现代生物医学研究的核心基石。方法：依托严密的前瞻性队列设计与稳健的敏感性分析模型，本研究评估了疾病风险演进轨迹与远期转归。结果：在全面校正多维混杂因素并计算 E-value 灵敏度指标后，证实了强稳健的因果关联。解释：该结论着重凸显了标准化质量控制与前沿因果推断方法在循证医学成果转化中的重大价值。`,
+    commonQuestions: [
+      "考官追问 1：How did the authors handle potential selection bias and residual confounding in this observational framework?",
+      "考官追问 2：If you were to design a follow-up study based on this paper, what specific statistical model or experimental assay would you adopt to validate the causal pathway?",
+      "考官追问 3：Please summarize the core clinical/public health implications of this study in three concise sentences.",
+    ],
+    keyGlossary: [
+      { term: "Causal Inference", translation: "因果推断（突破单纯相关性，严密求证真实病因）" },
+      { term: "Residual Confounding", translation: "残余混杂（即使多因素校正后依然可能存留的混杂偏倚）" },
+      { term: "Sensitivity Analysis", translation: "敏感性分析（评估假说与统计推断在极端设定下的稳健性）" },
+      { term: "E-value", translation: "E值（衡量未测量混杂需要达到多大效应强度才能推翻现有因果结论的指标）" },
+    ],
+    translationStrategy:
+      "抽题朗读与翻译时，保持沉着自信，遇到核心方法学术语（Causal inference, Sensitivity analysis）自然放慢重读；作答时先用 1 句话概括文献核心研究目的（What & Why），再用 2 点陈述其方法学创新点与局限性，体现出超越同龄人的国际顶刊精读思辨力。",
+  };
+}
+
+export function buildDynamicMentorMindsetAnalysis(
+  input: Partial<MedicalUserInput> = {},
+  details: ExtractedResumeDetails
+): string[] {
+  const mentorTitle = input.mentorName?.trim() || "目标导师";
+  const targetUniv = input.targetUniversity?.trim() || "目标院校";
+  const primaryProject = details.primaryProject;
+  const toolsStr = details.skillItems.slice(0, 3).join("、") || "统计与实验技能";
+
+  return [
+    `【科研自驱力与即战力】${mentorTitle}最看重推免生是否具备真实实操经验，能否将本科掌握的【${toolsStr}】快速无缝应用到课题组在研项目中，拒绝只会背书、缺乏动手排障能力的应试型学生；`,
+    `【方法学深度与科学求实】在推免面试中，考官极为警惕‘简历造假’或‘挂名刷成果’。针对【${primaryProject.slice(0, 15)}】，导师会死磕数据清洗逻辑与偏倚排查手段，考查学生对底层科学原理的真实敬畏；`,
+    `【抗压韧性与科研伦理】医学科研常伴随阴性结果或实验反复失败，${mentorTitle}看重学生在遭遇科研瓶颈时是否具备稳健的心态、严谨求真的回溯排查作风，绝不容忍选择性篡改或隐瞒数据；`,
+    `【团队协作与培养意向】顶尖平台【${targetUniv}】强调跨学科团队作战，导师偏爱沟通礼貌得体、具备大局观且能主动担当一线繁复质控任务的青年后备人才。`,
+  ];
+}
+
+export function buildDynamicDefenseChecklist(
+  input: Partial<MedicalUserInput> = {},
+  details: ExtractedResumeDetails
+): string[] {
+  const applicantName = input.name?.trim() || "考生";
+  const gpaRank = input.gpaRank?.trim() || "推免证明";
+  const primaryProject = details.primaryProject;
+
+  return [
+    `【硬件材料清单】由${applicantName}携带 5 份彩色打印并胶装成册的个人学术简历、本科官方成绩单（盖章原件）、推免排名证明（${gpaRank}）及外语成绩单原件；`,
+    `【答辩 PPT 严谨核查】确保 PPT 严格控制在 5 页以内，16:9 比例，导出 PDF 备用版以防考场 Office 字体或排版错乱；`,
+    `【简历科研死磕准备】对简历中【${primaryProject.slice(0, 18)}】的样本量、关键变量编码、异常值处理及敏感性分析细节烂熟于心，随时应对考官地狱级追问；`,
+    `【英文口试实战推演】熟练脱稿背诵 90 秒英文学术自述，关键专业术语发音清晰标准，提前模拟文献抽题翻译；`,
+    "【礼仪心理调适】身着得体正装，答辩全程与各位考官保持眼神交流，回答问题先致谢再有条理分点陈述，展现谦逊自信的大将之风。",
+  ];
+}
+
 /**
  * Ensures all 4 modules of MedicalAnalysisResult are populated and deeply personalized
  * according to the user's specific inputs (name, undergrad school, mentor, target university, GPA rank, etc.)
+ * GUARANTEE: Zero hardcoded example data ("周思敏", "2.4万人", etc.) leaks into user results!
  */
 export function enrichMedicalResult(
   result: Partial<MedicalAnalysisResult> | null | undefined,
   input?: Partial<MedicalUserInput>
 ): MedicalAnalysisResult {
-  let basePreset = PRESET_CLINICAL_MASTER;
-  const major = input?.major || "";
-  const track = input?.track || "";
-  const dept = input?.targetDepartment || "";
-  const hospital = input?.targetHospital || "";
-  const targetUniv = input?.targetUniversity || "";
+  const effectiveInput: Partial<MedicalUserInput> = input || {};
+  const resDetails = extractResumeDetails(effectiveInput);
 
-  if (
-    track === "preventive-public-health" ||
-    major.includes("预防") ||
-    major.includes("公共卫生") ||
-    dept.includes("流行病") ||
-    dept.includes("疾控") ||
-    dept.includes("统计") ||
-    hospital.includes("公共卫生") ||
-    targetUniv.includes("公共卫生")
-  ) {
-    basePreset = PRESET_PREVENTIVE_PUBLIC_HEALTH;
-  } else if (
-    track === "academic-research" ||
-    major.includes("基础") ||
-    dept.includes("实验室") ||
-    dept.includes("研究所")
-  ) {
-    basePreset = PRESET_ACADEMIC_MASTER;
-  }
+  // Dynamically build user-grounded defaults for all 4 deliverables
+  const dynamicPS = buildDynamicPSDiagnosis(effectiveInput, resDetails);
+  const dynamicCV = buildDynamicCVOptimization(effectiveInput, resDetails);
+  const dynamicEmail = buildDynamicMentorEmail(effectiveInput, resDetails);
+  const dynamicSlides = buildDynamicDefenseSlideFramework(effectiveInput, resDetails);
+  const dynamicLit = buildDynamicEnglishLiteratureDefense(effectiveInput, resDetails);
+  const dynamicMindset = buildDynamicMentorMindsetAnalysis(effectiveInput, resDetails);
+  const dynamicChecklist = buildDynamicDefenseChecklist(effectiveInput, resDetails);
+  const dynamicIntros = buildResumeBasedSelfIntroductions(effectiveInput, resDetails);
+  const dynamicEngIntro = buildResumeBasedEnglishSelfIntro(effectiveInput, resDetails);
+  const dynamicQuestions = buildResumeBasedQuestions(effectiveInput, resDetails);
 
-  const mock = JSON.parse(JSON.stringify(basePreset.mockResult)) as MedicalAnalysisResult;
+  // If LLM returned valid structured modules, use them and sanitize; otherwise use 100% dynamic synthesis
+  const llmPS = result?.psDiagnosis;
+  const llmCV = result?.cvOptimization;
+  const llmEmail = result?.mentorEmail;
+  const llmPrep = result?.labInterviewPrep;
+
+  const hasValidLLMPS = Boolean(llmPS && llmPS.sections && llmPS.sections.length > 0);
+  const hasValidLLMCV = Boolean(llmCV && llmCV.optimizedItems && llmCV.optimizedItems.length > 0);
+  const hasValidLLMEmail = Boolean(llmEmail && llmEmail.bodyText && llmEmail.bodyText.length > 20);
+  const hasValidLLMQuestions = Boolean(llmPrep?.questions && llmPrep.questions.length > 0);
+
   const merged: MedicalAnalysisResult = {
-    psDiagnosis:
-      result?.psDiagnosis && result.psDiagnosis.sections?.length
-        ? { ...mock.psDiagnosis, ...result.psDiagnosis }
-        : mock.psDiagnosis,
-    cvOptimization:
-      result?.cvOptimization && result.cvOptimization.optimizedItems?.length
-        ? { ...mock.cvOptimization, ...result.cvOptimization }
-        : mock.cvOptimization,
-    mentorEmail:
-      result?.mentorEmail && result.mentorEmail.bodyText?.length
-        ? { ...mock.mentorEmail, ...result.mentorEmail }
-        : mock.mentorEmail,
+    psDiagnosis: hasValidLLMPS && llmPS
+      ? {
+          overallScore: llmPS.overallScore || dynamicPS.overallScore,
+          dimensionScores: llmPS.dimensionScores?.length ? llmPS.dimensionScores : dynamicPS.dimensionScores,
+          mainIssues: (llmPS.mainIssues?.length ? llmPS.mainIssues : dynamicPS.mainIssues).map((s) => replaceAllTokens(s, effectiveInput)),
+          strengths: (llmPS.strengths?.length ? llmPS.strengths : dynamicPS.strengths).map((s) => replaceAllTokens(s, effectiveInput)),
+          prioritySuggestions: (llmPS.prioritySuggestions?.length ? llmPS.prioritySuggestions : dynamicPS.prioritySuggestions).map((s) => replaceAllTokens(s, effectiveInput)),
+          sections: llmPS.sections.map((sec, idx) => ({
+            sectionName: sec.sectionName || dynamicPS.sections[idx]?.sectionName || `第${idx + 1}部分`,
+            sectionTitle: replaceAllTokens(sec.sectionTitle || dynamicPS.sections[idx]?.sectionTitle || "", effectiveInput),
+            originalText: replaceAllTokens(sec.originalText || dynamicPS.sections[idx]?.originalText || "", effectiveInput),
+            optimizedText: replaceAllTokens(sec.optimizedText || dynamicPS.sections[idx]?.optimizedText || "", effectiveInput),
+            reason: replaceAllTokens(sec.reason || dynamicPS.sections[idx]?.reason || "", effectiveInput),
+            mentorFocusPoint: replaceAllTokens(sec.mentorFocusPoint || dynamicPS.sections[idx]?.mentorFocusPoint || "", effectiveInput),
+          })),
+          fullOptimizedPS: replaceAllTokens(llmPS.fullOptimizedPS || dynamicPS.fullOptimizedPS, effectiveInput),
+        }
+      : dynamicPS,
+
+    cvOptimization: hasValidLLMCV && llmCV
+      ? {
+          optimizedItems: llmCV.optimizedItems.map((item, idx) => ({
+            id: item.id || `cv-opt-${idx}`,
+            section: replaceAllTokens(item.section || dynamicCV.optimizedItems[idx]?.section || "", effectiveInput),
+            before: replaceAllTokens(item.before || dynamicCV.optimizedItems[idx]?.before || "", effectiveInput),
+            after: replaceAllTokens(item.after || dynamicCV.optimizedItems[idx]?.after || "", effectiveInput),
+            reason: replaceAllTokens(item.reason || dynamicCV.optimizedItems[idx]?.reason || "", effectiveInput),
+            academicStandardTip: replaceAllTokens(item.academicStandardTip || dynamicCV.optimizedItems[idx]?.academicStandardTip || "", effectiveInput),
+          })),
+          finalMedicalResume: {
+            personalInfo: {
+              name: effectiveInput.name?.trim() || "推免申请人",
+              undergradSchool: effectiveInput.undergradSchool?.trim() || "本科院校",
+              major: effectiveInput.major?.trim() || "医学专业",
+              gpaRank: effectiveInput.gpaRank?.trim() || "推免综合排名前列",
+              englishLevel: effectiveInput.englishLevel?.trim() || "大学英语六级良好",
+              phone: effectiveInput.phone?.trim() || "",
+              email: effectiveInput.email?.trim() || "",
+              targetTrack: effectiveInput.track || "preventive-public-health",
+              targetIntent: effectiveInput.mentorName
+                ? `意向导师：${effectiveInput.mentorName}${effectiveInput.targetUniversity ? ` · ${effectiveInput.targetUniversity}` : ""}`
+                : effectiveInput.targetUniversity
+                ? `目标院校：${effectiveInput.targetUniversity}`
+                : "",
+              targetUniversity: effectiveInput.targetUniversity?.trim() || "",
+            },
+            academicSummary: replaceAllTokens(
+              llmCV.finalMedicalResume?.academicSummary || dynamicCV.finalMedicalResume.academicSummary,
+              effectiveInput
+            ),
+            labSkills: llmCV.finalMedicalResume?.labSkills?.length
+              ? llmCV.finalMedicalResume.labSkills
+              : dynamicCV.finalMedicalResume.labSkills,
+            researchProjects: llmCV.finalMedicalResume?.researchProjects?.length
+              ? llmCV.finalMedicalResume.researchProjects.map((p) => ({
+                  title: replaceAllTokens(p.title, effectiveInput),
+                  role: replaceAllTokens(p.role, effectiveInput),
+                  period: p.period || "本科攻读期间",
+                  mentor: p.mentor ? replaceAllTokens(p.mentor, effectiveInput) : effectiveInput.undergradSchool || "本科科研团队",
+                  bullets: p.bullets.map((b) => replaceAllTokens(b, effectiveInput)),
+                }))
+              : dynamicCV.finalMedicalResume.researchProjects,
+            publications: llmCV.finalMedicalResume?.publications || [],
+            clinicalExperiences: llmCV.finalMedicalResume?.clinicalExperiences?.length
+              ? llmCV.finalMedicalResume.clinicalExperiences.map((c) => ({
+                  hospital: replaceAllTokens(c.hospital, effectiveInput),
+                  department: replaceAllTokens(c.department, effectiveInput),
+                  period: c.period || "临床实践阶段",
+                  bullets: c.bullets.map((b) => replaceAllTokens(b, effectiveInput)),
+                }))
+              : dynamicCV.finalMedicalResume.clinicalExperiences,
+            honorsAndScholarships: (llmCV.finalMedicalResume?.honorsAndScholarships?.length
+              ? llmCV.finalMedicalResume.honorsAndScholarships
+              : dynamicCV.finalMedicalResume.honorsAndScholarships
+            ).map((h) => replaceAllTokens(h, effectiveInput)),
+          },
+        }
+      : dynamicCV,
+
+    mentorEmail: hasValidLLMEmail && llmEmail
+      ? {
+          subjectOptions: dynamicEmail.subjectOptions, // Always dynamically tailored to user's real name/mentor/rank
+          salutation: dynamicEmail.salutation,
+          bodyText: replaceAllTokens(llmEmail.bodyText, effectiveInput),
+          attachmentChecklist: dynamicEmail.attachmentChecklist,
+          strategyTips: dynamicEmail.strategyTips,
+        }
+      : dynamicEmail,
+
     labInterviewPrep: {
-      selfIntroductions:
-        result?.labInterviewPrep?.selfIntroductions && result.labInterviewPrep.selfIntroductions.length > 0
-          ? result.labInterviewPrep.selfIntroductions
-          : mock.labInterviewPrep.selfIntroductions,
-      englishSelfIntro:
-        result?.labInterviewPrep?.englishSelfIntro && result.labInterviewPrep.englishSelfIntro.englishText?.length
-          ? result.labInterviewPrep.englishSelfIntro
-          : mock.labInterviewPrep.englishSelfIntro,
-      defenseSlideFramework:
-        result?.labInterviewPrep?.defenseSlideFramework && result.labInterviewPrep.defenseSlideFramework.length > 0
-          ? result.labInterviewPrep.defenseSlideFramework
-          : mock.labInterviewPrep.defenseSlideFramework,
-      englishLiteratureDefense:
-        result?.labInterviewPrep?.englishLiteratureDefense &&
-        result.labInterviewPrep.englishLiteratureDefense.articleTitle?.length
-          ? result.labInterviewPrep.englishLiteratureDefense
-          : mock.labInterviewPrep.englishLiteratureDefense,
-      questions:
-        result?.labInterviewPrep?.questions && result.labInterviewPrep.questions.length > 0
-          ? result.labInterviewPrep.questions
-          : mock.labInterviewPrep.questions,
-      mentorMindsetAnalysis:
-        result?.labInterviewPrep?.mentorMindsetAnalysis &&
-        result.labInterviewPrep.mentorMindsetAnalysis.length > 0
-          ? result.labInterviewPrep.mentorMindsetAnalysis
-          : mock.labInterviewPrep.mentorMindsetAnalysis,
-      defenseChecklist:
-        result?.labInterviewPrep?.defenseChecklist && result.labInterviewPrep.defenseChecklist.length > 0
-          ? result.labInterviewPrep.defenseChecklist
-          : mock.labInterviewPrep.defenseChecklist,
+      selfIntroductions: dynamicIntros,
+      englishSelfIntro: dynamicEngIntro,
+      questions: hasValidLLMQuestions && llmPrep?.questions
+        ? llmPrep.questions.map((q) => ({
+            category: q.category || "专业方法学与科研攻坚",
+            difficulty: q.difficulty || "高难度 (Hard)",
+            question: replaceAllTokens(q.question, effectiveInput),
+            coreIntent: replaceAllTokens(q.coreIntent, effectiveInput),
+            badAnswer: q.badAnswer ? replaceAllTokens(q.badAnswer, effectiveInput) : undefined,
+            recommendedAnswer: replaceAllTokens(q.recommendedAnswer, effectiveInput),
+            evidencePoints: q.evidencePoints.map((p) => replaceAllTokens(p, effectiveInput)),
+            academicWeapons: q.academicWeapons?.map((w) => replaceAllTokens(w, effectiveInput)),
+          }))
+        : dynamicQuestions,
+      defenseSlideFramework: dynamicSlides,
+      englishLiteratureDefense: dynamicLit,
+      mentorMindsetAnalysis: dynamicMindset,
+      defenseChecklist: dynamicChecklist,
     },
   };
 
-  if (!input) return merged;
-
-  const applicantName = input.name?.trim() || "";
-  const school = input.undergradSchool?.trim() || "";
-  const targetUnivName = input.targetUniversity?.trim() || input.targetHospital?.trim() || "";
-  const mentorTitle = input.mentorName?.trim()
-    ? input.mentorName.includes("教授") || input.mentorName.includes("老师") || input.mentorName.includes("主任")
-      ? input.mentorName.trim()
-      : `${input.mentorName.trim()}教授`
-    : "";
-  const stage = input.applicationStage?.trim() || "推免";
-  const stageTag = stage.includes("自荐") || stage.includes("申请") ? stage : `${stage}自荐`;
-  const paperOrDir = input.mentorKeyPaper?.trim() || input.mentorResearchDirection?.trim() || "";
-
-  // 1. DYNAMIC RECONSTRUCTION OF EMAIL SUBJECTS (Never hardcode example values)
-  const nameLabel = applicantName || "医学推免生";
-  const schoolRank = [school, input.gpaRank?.trim()].filter(Boolean).join("·");
-  const schoolRankLabel = schoolRank ? `(${schoolRank})` : "";
-  const targetApplyLabel = mentorTitle
-    ? `申请加入${mentorTitle}课题组深造`
-    : targetUnivName
-    ? `申请攻读${targetUnivName}研究生`
-    : "申请攻读研究生深造自荐";
-
-  merged.mentorEmail.subjectOptions = [
-    {
-      style: "学术自驱型 (推荐)",
-      subject: `【${stageTag}】${nameLabel}${schoolRankLabel}${targetApplyLabel}`,
-    },
-    {
-      style: "方法学探讨型",
-      subject: paperOrDir
-        ? `【${stageTag}】${nameLabel}拜读${mentorTitle || "课题组"}${paperOrDir.slice(0, 24)}近作及科研设想`
-        : `【${stageTag}】${nameLabel}${schoolRankLabel}-科研设想与自荐信`,
-    },
-    {
-      style: "规范严谨型",
-      subject: `【推免生自荐】${school ? `${school}` : ""}${nameLabel}申请加入${targetUnivName || mentorTitle || "医学科研团队"}`,
-    },
-  ];
-
-  merged.mentorEmail.salutation = mentorTitle ? `尊敬的${mentorTitle}：` : "尊敬的老师：";
-  merged.mentorEmail.bodyText = replaceAllTokens(merged.mentorEmail.bodyText, input);
-  if (applicantName) {
-    merged.mentorEmail.bodyText = merged.mentorEmail.bodyText.replace(/学生：.*谨呈/g, `学生：${applicantName} 谨呈`);
-  } else {
-    merged.mentorEmail.bodyText = merged.mentorEmail.bodyText.replace(/学生：.*谨呈/g, `推免申请人 谨呈`);
-  }
-
-  // 2. PERSONAL STATEMENT BEFORE / AFTER DEEP BINDING
-  if (input.originalPS && input.originalPS.trim().length > 20) {
-    const rawParas = input.originalPS
-      .split(/\n\s*\n|\n/)
-      .map((p) => p.trim())
-      .filter((p) => p.length > 0);
-
-    if (merged.psDiagnosis.sections && merged.psDiagnosis.sections.length > 0) {
-      const secCount = merged.psDiagnosis.sections.length;
-      merged.psDiagnosis.sections.forEach((sec, sIdx) => {
-        if (rawParas.length >= secCount) {
-          sec.originalText = rawParas[sIdx] || rawParas[rawParas.length - 1];
-        } else if (rawParas.length > 0) {
-          const chunkIdx = Math.min(sIdx, rawParas.length - 1);
-          sec.originalText = rawParas[chunkIdx];
-        }
-        sec.optimizedText = replaceAllTokens(sec.optimizedText, input);
-        sec.reason = replaceAllTokens(sec.reason, input);
-        sec.mentorFocusPoint = replaceAllTokens(sec.mentorFocusPoint, input);
-      });
-    }
-  } else {
-    if (merged.psDiagnosis.sections) {
-      merged.psDiagnosis.sections.forEach((sec) => {
-        sec.originalText = replaceAllTokens(sec.originalText, input);
-        sec.optimizedText = replaceAllTokens(sec.optimizedText, input);
-        sec.reason = replaceAllTokens(sec.reason, input);
-        sec.mentorFocusPoint = replaceAllTokens(sec.mentorFocusPoint, input);
-      });
-    }
-  }
-
-  merged.psDiagnosis.fullOptimizedPS = replaceAllTokens(merged.psDiagnosis.fullOptimizedPS, input);
-
-  // 3. CV PERSONAL INFO & SUMMARY DEEP BINDING (Do NOT inherit fake preset phones/emails/names)
-  if (merged.cvOptimization?.finalMedicalResume?.personalInfo) {
-    const pInfo = merged.cvOptimization.finalMedicalResume.personalInfo;
-    pInfo.name = applicantName;
-    pInfo.undergradSchool = school;
-    pInfo.major = input.major?.trim() || "";
-    pInfo.gpaRank = input.gpaRank?.trim() || "";
-    pInfo.englishLevel = input.englishLevel?.trim() || "";
-    pInfo.targetUniversity = targetUnivName;
-    pInfo.phone = input.phone?.trim() || "";
-    pInfo.email = input.email?.trim() || "";
-    pInfo.targetIntent = mentorTitle
-      ? `意向导师：${mentorTitle}${targetUnivName ? ` · ${targetUnivName}` : ""}`
-      : targetUnivName
-      ? `目标院校：${targetUnivName}`
-      : "";
-  }
-
-  // If user provided custom text without mentioning publications, never fabricate fake papers
-  if (merged.cvOptimization?.finalMedicalResume) {
-    const resume = merged.cvOptimization.finalMedicalResume;
-    const rawAll = ((input.originalPS || "") + " " + (input.originalResume || "")).trim();
-    if (rawAll.length > 0 && !rawAll.includes("中华") && !rawAll.includes("Lancet") && !rawAll.includes("SCI") && !rawAll.includes("论文") && !rawAll.includes("录用") && !rawAll.includes("发表")) {
-      resume.publications = [];
-    }
-  }
-
-  if (merged.cvOptimization?.finalMedicalResume?.academicSummary) {
-    merged.cvOptimization.finalMedicalResume.academicSummary = replaceAllTokens(
-      merged.cvOptimization.finalMedicalResume.academicSummary,
-      input
-    );
-  }
-
-  if (merged.cvOptimization?.optimizedItems) {
-    merged.cvOptimization.optimizedItems.forEach((item) => {
-      item.before = replaceAllTokens(item.before, input);
-      item.after = replaceAllTokens(item.after, input);
-      item.reason = replaceAllTokens(item.reason, input);
-    });
-  }
-
-  if (merged.cvOptimization?.finalMedicalResume?.honorsAndScholarships) {
-    merged.cvOptimization.finalMedicalResume.honorsAndScholarships =
-      merged.cvOptimization.finalMedicalResume.honorsAndScholarships.map((h) => replaceAllTokens(h, input));
-  }
-
-  const resDetails = extractResumeDetails(input);
-  const firstQ = merged.labInterviewPrep?.questions?.[0]?.question || "";
-  const firstIntro = merged.labInterviewPrep?.selfIntroductions?.[0]?.speechText || "";
-  const firstEng = merged.labInterviewPrep?.englishSelfIntro?.englishText || "";
-
-  const needsResumeOverhaul =
-    !resDetails.isDefault24kCohort &&
-    (
-      resDetails.hasCustomResume ||
-      firstQ.includes("2.4 万人") ||
-      firstIntro.includes("2.4 万人") ||
-      firstEng.includes("24,000")
-    );
-
-  if (needsResumeOverhaul) {
-    // 1. Rewrite self-introductions with real resume
-    merged.labInterviewPrep.selfIntroductions = buildResumeBasedSelfIntroductions(input || {}, resDetails);
-
-    // 2. Rewrite English self-intro with real resume
-    merged.labInterviewPrep.englishSelfIntro = buildResumeBasedEnglishSelfIntro(input || {}, resDetails);
-
-    // 3. Rewrite 5 questions with real resume
-    merged.labInterviewPrep.questions = buildResumeBasedQuestions(input || {}, resDetails);
-
-    // 4. Update CV research projects with real resume if needed
-    if (merged.cvOptimization?.finalMedicalResume) {
-      const cvResume = merged.cvOptimization.finalMedicalResume;
-      const firstProjTitle = cvResume.researchProjects?.[0]?.title || "";
-      if (
-        firstProjTitle.includes("2.4 万") ||
-        firstProjTitle.includes("华南社区居民") ||
-        firstProjTitle.includes("国家自然科学基金重大慢性病专项") ||
-        (resDetails.researchItems.length > 0 && !resDetails.isDefault24kCohort)
-      ) {
-        if (resDetails.researchProjects.length > 0) {
-          cvResume.researchProjects = resDetails.researchProjects.map((proj, idx) => {
-            const bullets =
-              proj.bullets.length > 0
-                ? proj.bullets.map((b) => (b.endsWith("；") || b.endsWith("。") ? b : `${b}；`))
-                : [
-                    `负责${proj.title}的方案设计、数据采集与质控，运用${resDetails.skillItems.slice(0, 3).join("、") || "专业统计方法"}开展深入分析；`,
-                    `针对关键变量与潜在偏倚开展系统核查，保障研究结果的科学性与客观可重复性。`,
-                  ];
-            return {
-              title: proj.title,
-              role: idx === 0 ? "项目负责人 / 核心骨干" : "团队成员 / 统计分析参与者",
-              period: "本科攻读期间",
-              mentor: school || "本科院校科研团队",
-              bullets,
-            };
-          });
-        }
-      }
-
-      const firstClinicHosp = cvResume.clinicalExperiences?.[0]?.hospital || "";
-      if (
-        firstClinicHosp.includes("广东省疾病预防控制中心") ||
-        firstClinicHosp.includes("传染病预防控制所") ||
-        (resDetails.clinicalItems.length > 0 && !resDetails.isDefault24kCohort)
-      ) {
-        if (resDetails.clinicalItems.length > 0) {
-          cvResume.clinicalExperiences = resDetails.clinicalItems.map((cTitle) => ({
-            hospital: cTitle.includes("医院") || cTitle.includes("中心") ? cTitle.split(/[，,。\s]/)[0] : (school ? `${school}教学医院` : "医学院附属医院"),
-            department: cTitle.includes("科") ? cTitle : "临床通科规范化轮转",
-            period: "临床实践阶段",
-            bullets: [
-              `深入一线规范参与${cTitle}的日常工作，书写医疗文书并严守医疗质量安全；`,
-              `在带教老师指导下参与疑难病例讨论，培养扎实的循证临床思辨与医患沟通能力。`,
-            ],
-          }));
-        }
-      }
-    }
-  }
-
-  if (!needsResumeOverhaul) {
-    if (merged.cvOptimization?.finalMedicalResume?.researchProjects) {
-      merged.cvOptimization.finalMedicalResume.researchProjects.forEach((proj) => {
-        proj.title = replaceAllTokens(proj.title, input);
-        proj.role = replaceAllTokens(proj.role, input);
-        if (proj.mentor) {
-          proj.mentor = replaceAllTokens(proj.mentor, input);
-        }
-        proj.bullets = proj.bullets.map((b) => replaceAllTokens(b, input));
-      });
-    }
-
-    if (merged.cvOptimization?.finalMedicalResume?.clinicalExperiences) {
-      merged.cvOptimization.finalMedicalResume.clinicalExperiences.forEach((exp) => {
-        exp.hospital = replaceAllTokens(exp.hospital, input);
-        exp.department = replaceAllTokens(exp.department, input);
-        exp.bullets = exp.bullets.map((b) => replaceAllTokens(b, input));
-      });
-    }
-
-    // INTERVIEW STUDIO replacements for preset mock fallback
-    if (merged.labInterviewPrep?.selfIntroductions) {
-      merged.labInterviewPrep.selfIntroductions.forEach((intro) => {
-        intro.speechText = replaceAllTokens(intro.speechText, input);
-        intro.breakdownTips = intro.breakdownTips.map((tip) => replaceAllTokens(tip, input));
-        intro.keyHighlights = intro.keyHighlights.map((hl) => replaceAllTokens(hl, input));
-      });
-    }
-
-    if (merged.labInterviewPrep?.englishSelfIntro) {
-      const eng = merged.labInterviewPrep.englishSelfIntro;
-      eng.chineseTranslation = replaceAllTokens(eng.chineseTranslation, input);
-      if (applicantName) {
-        eng.englishText = eng.englishText.replace(/Simin Zhou|Shuhan Chen|Yizhou Lin/gi, applicantName);
-      } else {
-        eng.englishText = eng.englishText.replace(/Simin Zhou|Shuhan Chen|Yizhou Lin/gi, "the applicant");
-      }
-      if (school) {
-        eng.englishText = eng.englishText.replace(
-          /Sun Yat-sen University|Huazhong University|Central South University/gi,
-          school
-        );
-      } else {
-        eng.englishText = eng.englishText.replace(
-          /Sun Yat-sen University|Huazhong University|Central South University/gi,
-          "my undergraduate university"
-        );
-      }
-      if (targetUnivName) {
-        eng.englishText = eng.englishText.replace(
-          /Peking University|Fudan University|Sun Yat-sen University/gi,
-          targetUnivName
-        );
-      } else {
-        eng.englishText = eng.englishText.replace(
-          /Peking University|Fudan University|Sun Yat-sen University/gi,
-          "your esteemed institution"
-        );
-      }
-      if (mentorTitle && input.mentorName) {
-        eng.englishText = eng.englishText.replace(
-          /Professor Gao|Professor Li|Professor Shen/gi,
-          `Professor ${input.mentorName.replace(/教授|老师|主任/g, "")}`
-        );
-      } else {
-        eng.englishText = eng.englishText.replace(
-          /Professor Gao|Professor Li|Professor Shen/gi,
-          "the distinguished professors"
-        );
-      }
-
-      if (input.englishLevel) {
-        eng.englishText = eng.englishText.replace(/CET-6\s*635|635\s*in\s*CET-6|score\s*of\s*635/gi, input.englishLevel);
-      } else {
-        eng.englishText = eng.englishText.replace(/CET-6\s*635|635\s*in\s*CET-6|score\s*of\s*635/gi, "passed CET-6");
-      }
-    }
-
-    if (merged.labInterviewPrep?.questions) {
-      merged.labInterviewPrep.questions.forEach((q) => {
-        q.question = replaceAllTokens(q.question, input);
-        if (q.coreIntent) q.coreIntent = replaceAllTokens(q.coreIntent, input);
-        if (q.badAnswer) q.badAnswer = replaceAllTokens(q.badAnswer, input);
-        if (q.recommendedAnswer) q.recommendedAnswer = replaceAllTokens(q.recommendedAnswer, input);
-        if (q.evidencePoints) q.evidencePoints = q.evidencePoints.map((p) => replaceAllTokens(p, input));
-        if (q.academicWeapons) q.academicWeapons = q.academicWeapons.map((w) => replaceAllTokens(w, input));
-      });
-    }
-  }
-
-  if (merged.labInterviewPrep?.defenseSlideFramework) {
-    merged.labInterviewPrep.defenseSlideFramework.forEach((slide) => {
-      slide.speakingScript = replaceAllTokens(slide.speakingScript, input);
-      slide.contentFocus = replaceAllTokens(slide.contentFocus, input);
-      slide.title = replaceAllTokens(slide.title, input);
-      slide.visualAdvice = replaceAllTokens(slide.visualAdvice, input);
-    });
-  }
-
-  if (merged.mentorEmail.attachmentChecklist) {
-    merged.mentorEmail.attachmentChecklist = merged.mentorEmail.attachmentChecklist.map((item) =>
-      replaceAllTokens(item, input)
-    );
-  }
-  if (merged.mentorEmail.strategyTips) {
-    merged.mentorEmail.strategyTips = merged.mentorEmail.strategyTips.map((tip) =>
-      replaceAllTokens(tip, input)
-    );
-  }
-
-  if (merged.psDiagnosis.strengths) {
-    merged.psDiagnosis.strengths = merged.psDiagnosis.strengths.map((s) => replaceAllTokens(s, input));
-  }
-  if (merged.psDiagnosis.mainIssues) {
-    merged.psDiagnosis.mainIssues = merged.psDiagnosis.mainIssues.map((s) => replaceAllTokens(s, input));
-  }
-  if (merged.psDiagnosis.prioritySuggestions) {
-    merged.psDiagnosis.prioritySuggestions = merged.psDiagnosis.prioritySuggestions.map((s) => replaceAllTokens(s, input));
-  }
-
-  if (merged.labInterviewPrep?.mentorMindsetAnalysis) {
-    merged.labInterviewPrep.mentorMindsetAnalysis = merged.labInterviewPrep.mentorMindsetAnalysis.map((m) =>
-      typeof m === "string" ? replaceAllTokens(m, input) : m
-    );
-  }
-
-  if (merged.labInterviewPrep?.defenseChecklist) {
-    merged.labInterviewPrep.defenseChecklist = merged.labInterviewPrep.defenseChecklist.map((c) =>
-      typeof c === "string" ? replaceAllTokens(c, input) : c
-    );
-  }
-
   return merged;
 }
+
+

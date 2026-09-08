@@ -54,7 +54,6 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useMedicalStore } from "@/store/medical-store";
 import { useAIConfigStore } from "@/store/ai-config-store";
-import { MEDICAL_PRESETS } from "@/lib/medical-presets";
 import { runMedicalAnalysis } from "@/services/ai/medicalAgent";
 import { copyToClipboard, delay } from "@/lib/utils";
 import {
@@ -143,6 +142,7 @@ export default function MedicalPage() {
     updateOptimizedPSSection,
     updateFullOptimizedPS,
     updateEmailDraft,
+    clearAllInputs,
     reset,
   } = useMedicalStore();
 
@@ -167,6 +167,7 @@ export default function MedicalPage() {
   // API Key & Material Guidance Modal States
   const [showApiKeyModal, setShowApiKeyModal] = useState(false);
   const [showMissingMaterialModal, setShowMissingMaterialModal] = useState(false);
+  const [showRegenSuccessModal, setShowRegenSuccessModal] = useState(false);
   const [tempApiKey, setTempApiKey] = useState(aiConfig?.apiKey || "");
   const [tempProvider, setTempProvider] = useState(aiConfig?.providerId || "deepseek");
   const [tempBaseUrl, setTempBaseUrl] = useState(aiConfig?.baseUrl || "https://api.deepseek.com/v1");
@@ -287,14 +288,17 @@ export default function MedicalPage() {
       setCurrentStageLog("🎉 全套 4 大板块已全部重构完成！正在为您解锁并载入成果工作台...");
       await delay(500);
       setAnalysisResult(result);
-      setActiveTab("ps");
+      if (activeTab === "input") {
+        setActiveTab("ps");
+      }
 
       const nowTime = new Date().toLocaleTimeString("zh-CN", { hour12: false });
       setLastGeneratedAt(nowTime);
       setLastMode(mode);
       setGenerationCount((prev) => prev + 1);
       setRecentRegenSuccess(true);
-      setTimeout(() => setRecentRegenSuccess(false), 4000);
+      setShowRegenSuccessModal(true);
+      setTimeout(() => setRecentRegenSuccess(false), 5000);
 
       if (warning) {
         setApiNotice(warning);
@@ -302,6 +306,7 @@ export default function MedicalPage() {
         setApiNotice(null);
       }
       setShowSuccessToast(true);
+
     } catch (err) {
       clearInterval(intervalTimer);
       const errMsg = err instanceof Error ? err.message : "AI 分析失败，请检查网络或大模型配置后重试";
@@ -444,23 +449,9 @@ export default function MedicalPage() {
             <Zap className="h-4 w-4 text-amber-300" />
             前往第 1 步一键启动全案 AI 优化
           </Button>
-          <Button
-            size="lg"
-            variant="outline"
-            onClick={() => {
-              loadPreset("preventive-public-health");
-              setActiveTab("input");
-              setTimeout(() => {
-                document.getElementById("start-analysis-btn")?.scrollIntoView({ behavior: "smooth", block: "center" });
-              }, 50);
-            }}
-            className="border-slate-300 text-slate-700 hover:bg-slate-100 gap-1.5 cursor-pointer"
-          >
-            <Sparkles className="h-4 w-4 text-teal-600" />
-            载入示范数据并前往
-          </Button>
         </div>
       )}
+
     </div>
   );
 
@@ -474,20 +465,26 @@ export default function MedicalPage() {
             {recentRegenSuccess ? "🎉 全套成果已全新重新生成！" : "🎉 全套 4 大 AI 重构成果已一次性全自动就绪："}
           </span>
           {lastGeneratedAt && (
-            <Badge className="bg-emerald-500/20 text-emerald-300 border-emerald-400/40 text-[10px] px-2 py-0.5 font-mono flex items-center gap-1">
-              <Clock className="h-3 w-3" />
-              <span>更新于 {lastGeneratedAt}</span>
-            </Badge>
+            <button
+              type="button"
+              onClick={() => setShowRegenSuccessModal(true)}
+              className="bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-400/40 text-[10px] px-2 py-0.5 rounded-full font-mono flex items-center gap-1 cursor-pointer transition-colors"
+              title="点击查看本次重新生成的详细摘要"
+            >
+              <Clock className="h-3 w-3 text-emerald-300" />
+              <span>更新于 {lastGeneratedAt} (查看摘要)</span>
+            </button>
           )}
           <Badge className="bg-teal-500/20 text-teal-200 border-teal-400/30 text-[10px] px-2 py-0.5 font-normal">
             {lastMode === "llm" ? "大模型原生深度推理" : "全真学术保障引擎"}
           </Badge>
         </div>
         <p className="text-[11px] text-slate-300">
-          对齐目标申报院校：<strong>{medicalInput.targetUniversity || "目标院校"}</strong>
-          {medicalInput.preventiveSubSpecialty ? ` · ${medicalInput.preventiveSubSpecialty.split(" (")[0]}` : ""}
-          <span className="text-slate-400 ml-2">（个人陈述、学术简历、自荐信、考核答辩已全部联动刷新）</span>
+          生成依据：<strong>{medicalInput.name || "推免生"}</strong> · {medicalInput.undergradSchool || "本科院校"}
+          {medicalInput.targetUniversity ? ` ➔ ${medicalInput.targetUniversity}` : ""}
+          <span className="text-emerald-300 ml-2 font-medium">（已全面联动刷新 4 大板块，零示例污染）</span>
         </p>
+
       </div>
 
       <div className="flex items-center gap-1.5 flex-wrap">
@@ -609,11 +606,17 @@ export default function MedicalPage() {
           <div className="flex items-center gap-2">
             {/* Top Right Re-analyze Button with Status & Timestamp */}
             {lastGeneratedAt && (
-              <span className="hidden md:inline-flex items-center gap-1 text-[11px] text-slate-500 bg-slate-100 border border-slate-200 px-2 py-1 rounded-lg">
-                <Clock className="h-3 w-3 text-slate-400" />
+              <button
+                type="button"
+                onClick={() => setShowRegenSuccessModal(true)}
+                className="hidden md:inline-flex items-center gap-1 text-[11px] text-teal-800 bg-teal-50 hover:bg-teal-100 border border-teal-200 px-2 py-1 rounded-lg cursor-pointer transition-colors"
+                title="点击查看更新摘要"
+              >
+                <Clock className="h-3 w-3 text-teal-600" />
                 <span>更新于 {lastGeneratedAt}</span>
-              </span>
+              </button>
             )}
+
             <Button
               size="sm"
               onClick={() => handleStartAnalysis()}
@@ -695,37 +698,60 @@ export default function MedicalPage() {
               </p>
             </div>
 
-            {/* Quick Presets Buttons */}
+            {/* Track Switcher (Updates methodology mode without overwriting user data) */}
             <div className="flex flex-col gap-2 shrink-0">
               <div className="text-[11px] text-teal-200 font-semibold flex items-center gap-1">
-                <span>⚡ 快速载入真实级申请背景草稿（载入后由 AI 优化）：</span>
+                <span>🎯 选择目标推免赛道（自动对齐核心方法学）：</span>
               </div>
               <div className="flex flex-wrap lg:flex-col gap-2">
-                {MEDICAL_PRESETS.map((preset, pIdx) => (
-                  <button
-                    key={preset.id}
-                    type="button"
-                    onClick={() => loadPreset(preset.id)}
-                    className={`flex items-center justify-between p-2.5 rounded-xl border text-left transition-all hover:scale-[1.01] active:scale-[0.99] ${
-                      pIdx === 0
-                        ? "bg-teal-500/20 hover:bg-teal-500/30 border-teal-400/40 text-white ring-1 ring-teal-400/30"
-                        : "bg-white/10 hover:bg-white/20 border-white/10 text-slate-200"
-                    }`}
-                  >
-                    <div>
-                      <div className="flex items-center gap-1.5 text-xs font-bold">
-                        <Sparkles className={`h-3.5 w-3.5 ${pIdx === 0 ? "text-teal-300" : "text-slate-300"}`} />
-                        <span>{preset.title.split("（")[0]}</span>
-                        {pIdx === 0 && (
-                          <span className="text-[10px] bg-teal-400/30 text-teal-200 px-1 py-0.2 rounded font-normal">
-                            推荐首选
-                          </span>
-                        )}
+                {[
+                  {
+                    id: "preventive-public-health" as const,
+                    title: "公共卫生与预防医学",
+                    tag: "慢病前瞻队列 · 孟德尔随机化 · R/SAS",
+                    badge: "推荐首选",
+                  },
+                  {
+                    id: "academic-research" as const,
+                    title: "基础医学与学术科研",
+                    tag: "分子机制 · 细胞类器官 · 通路验证",
+                    badge: "学术科研",
+                  },
+                  {
+                    id: "clinical-professional" as const,
+                    title: "临床医学专硕 / 学硕",
+                    tag: "三甲规培管床 · 临床回顾队列 · 循证实践",
+                    badge: "临床专硕",
+                  },
+                ].map((item) => {
+                  const isSelected = (medicalInput.track || "preventive-public-health") === item.id;
+                  return (
+                    <button
+                      key={item.id}
+                      type="button"
+                      onClick={() => setMedicalInput({ track: item.id })}
+                      className={`flex items-center justify-between p-2.5 rounded-xl border text-left transition-all hover:scale-[1.01] active:scale-[0.99] cursor-pointer ${
+                        isSelected
+                          ? "bg-teal-500/30 border-teal-400 text-white ring-2 ring-teal-400/40 shadow-sm"
+                          : "bg-white/10 hover:bg-white/20 border-white/10 text-slate-200"
+                      }`}
+                    >
+                      <div>
+                        <div className="flex items-center gap-1.5 text-xs font-bold">
+                          <Sparkles className={`h-3.5 w-3.5 ${isSelected ? "text-teal-300" : "text-slate-300"}`} />
+                          <span>{item.title}</span>
+                          {item.badge && (
+                            <span className="text-[10px] bg-teal-400/30 text-teal-200 px-1 py-0.2 rounded font-normal">
+                              {item.badge}
+                            </span>
+                          )}
+                        </div>
+                        <span className="text-[11px] text-slate-300/80 block mt-0.5">{item.tag}</span>
                       </div>
-                      <span className="text-[11px] text-slate-300/80 block mt-0.5">{preset.tag}</span>
-                    </div>
-                  </button>
-                ))}
+                      {isSelected && <CheckCircle2 className="h-4 w-4 text-teal-300 shrink-0 ml-2" />}
+                    </button>
+                  );
+                })}
               </div>
             </div>
           </div>
@@ -1009,8 +1035,45 @@ export default function MedicalPage() {
           {/* TAB 1: Input */}
           {activeTab === "input" && (
             <div className="space-y-6">
+              {/* Form Actions Header: Clear Inputs & Input Guarantees */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3.5 rounded-xl bg-slate-50 border border-slate-200">
+                <div className="space-y-0.5">
+                  <div className="flex items-center gap-2">
+                    <Sparkles className="h-4 w-4 text-teal-600" />
+                    <span className="text-xs sm:text-sm font-bold text-slate-900">
+                      录入您的真实保研申请材料（100% 基于您的输入深度重构）
+                    </span>
+                    <Badge variant="outline" className="bg-emerald-50 text-emerald-700 border-emerald-300 text-[10px] py-0 px-1.5">
+                      零示例污染保障
+                    </Badge>
+                  </div>
+                  <p className="text-[11px] text-slate-500">
+                    系统将严格依据您填写的真实经历生成全套 4 大成果。如需从纯净空白开始，可随时一键清空。
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-2 shrink-0">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      if (confirm("确定要一键清空所有已录入的信息与历史分析结果吗？")) {
+                        clearAllInputs();
+                      }
+                    }}
+                    className="h-8 text-xs text-rose-700 hover:text-rose-800 border-rose-200 hover:bg-rose-50 gap-1.5 cursor-pointer font-medium"
+                    title="清空所有输入框与缓存结果，从纯净空白表单开始"
+                  >
+                    <RotateCcw className="h-3.5 w-3.5 text-rose-600" />
+                    <span>一键清空所有输入</span>
+                  </Button>
+                </div>
+              </div>
+
               {/* TOP: Track & Specialty Selection */}
               <div className="space-y-3 p-4 rounded-xl bg-slate-50/80 border border-slate-200">
+
                 <div className="flex items-center justify-between">
                   <Label className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
                     <GraduationCap className="h-4 w-4 text-teal-600" />
@@ -1479,18 +1542,7 @@ export default function MedicalPage() {
                         ⚙️ 立即前往配置 API Key
                       </Button>
                     </Link>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => {
-                        loadPreset("preventive-public-health");
-                        setAnalysisError(null);
-                      }}
-                      className="h-7 text-xs border-rose-300 text-rose-800 hover:bg-rose-100/60"
-                    >
-                      <Sparkles className="h-3.5 w-3.5 mr-1 text-teal-600" />
-                      一键载入预防医学优秀示范数据测试
-                    </Button>
+
                     <Button
                       size="sm"
                       variant="ghost"
@@ -3264,6 +3316,127 @@ export default function MedicalPage() {
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* Centered Re-analysis Success Modal */}
+      <Dialog open={showRegenSuccessModal} onOpenChange={setShowRegenSuccessModal}>
+        <DialogContent className="sm:max-w-lg bg-white border-slate-200 shadow-2xl p-6 text-slate-900 animate-in zoom-in-95 duration-200">
+          <DialogHeader className="space-y-2 text-center pb-2 border-b border-slate-100">
+            <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-emerald-50 text-emerald-600 border border-emerald-200 shadow-xs">
+              <CheckCircle2 className="h-8 w-8 text-emerald-600" />
+            </div>
+            <DialogTitle className="text-xl font-bold text-slate-900">
+              🎉 重新分析已全部完成！
+            </DialogTitle>
+            <DialogDescription className="text-xs text-slate-600">
+              完成时间：<strong className="text-emerald-700">{lastGeneratedAt || "刚刚"}</strong> · 第 {generationCount} 次深度重塑
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-3.5 py-2 text-xs">
+            <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-1">
+              <div className="flex items-center justify-between">
+                <span className="font-semibold text-slate-800">生成依据</span>
+                <Badge variant="outline" className="bg-emerald-50 text-emerald-700 border-emerald-300 text-[10px]">
+                  100% 依据您录入的真实信息
+                </Badge>
+              </div>
+              <p className="text-slate-600 text-[11px] leading-relaxed">
+                申请人：<strong>{medicalInput.name || "推免申请人"}</strong> · 本科：<strong>{medicalInput.undergradSchool || "未填写"}</strong> · 目标：<strong>{medicalInput.targetUniversity || medicalInput.mentorName || "目标院校/导师"}</strong>
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              <div className="text-[11px] font-bold text-slate-700 uppercase tracking-wider">
+                全套 4 大板块已同步更新：
+              </div>
+              <div className="grid grid-cols-1 gap-2">
+                <div className="flex items-start gap-2.5 p-2.5 rounded-lg bg-teal-50/70 border border-teal-200 text-teal-950">
+                  <FileCheck className="h-4 w-4 text-teal-600 shrink-0 mt-0.5" />
+                  <div>
+                    <div className="font-bold text-teal-900">① 个人陈述 (PS) · PARE 逐段深度重塑</div>
+                    <p className="text-[11px] text-teal-700">已结合您的核心课题与实践经历，完成 4 阶段方法学质控重构。</p>
+                  </div>
+                </div>
+
+                <div className="flex items-start gap-2.5 p-2.5 rounded-lg bg-indigo-50/70 border border-indigo-200 text-indigo-950">
+                  <Microscope className="h-4 w-4 text-indigo-600 shrink-0 mt-0.5" />
+                  <div>
+                    <div className="font-bold text-indigo-900">② 学术简历 (CV) · 真实技能与方法学强化</div>
+                    <p className="text-[11px] text-indigo-700">已按医学规范量化科研质控、一线轮转与专业工具链标注。</p>
+                  </div>
+                </div>
+
+                <div className="flex items-start gap-2.5 p-2.5 rounded-lg bg-purple-50/70 border border-purple-200 text-purple-950">
+                  <Mail className="h-4 w-4 text-purple-600 shrink-0 mt-0.5" />
+                  <div>
+                    <div className="font-bold text-purple-900">③ 导师自荐信 · 高回复率邮件方案</div>
+                    <p className="text-[11px] text-purple-700">已对齐目标导师与课题组方向，更新定制化邮件主题、正文与附件清单。</p>
+                  </div>
+                </div>
+
+                <div className="flex items-start gap-2.5 p-2.5 rounded-lg bg-rose-50/70 border border-rose-200 text-rose-950">
+                  <HelpCircle className="h-4 w-4 text-rose-600 shrink-0 mt-0.5" />
+                  <div>
+                    <div className="font-bold text-rose-900">④ 考核答辩与追问 · 1/3/5分自述与高难攻防</div>
+                    <p className="text-[11px] text-rose-700">已生成全套中英文自我介绍、5页答辩PPT框架及地狱级学术追问与应答武器。</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="pt-2 flex flex-col sm:flex-row items-center gap-2">
+              <Button
+                onClick={() => {
+                  setShowRegenSuccessModal(false);
+                  if (activeTab === "input") {
+                    setActiveTab("ps");
+                  }
+                }}
+                className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold h-10 text-xs shadow-md cursor-pointer gap-1.5"
+              >
+                <Check className="h-4 w-4" />
+                <span>立即查看最新重构成果</span>
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Floating Centered Analysis Loading Overlay */}
+      {isAnalyzing && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-150">
+          <div className="bg-white rounded-2xl p-6 max-w-md w-full shadow-2xl border border-teal-100 space-y-4 text-center">
+            <div className="h-16 w-16 mx-auto rounded-2xl bg-teal-50 border border-teal-200 flex items-center justify-center text-teal-600 shadow-xs">
+              <RefreshCw className="h-8 w-8 text-teal-600 animate-spin" />
+            </div>
+            <div className="space-y-1">
+              <Badge className="bg-teal-100 text-teal-900 border-teal-300 text-xs px-2.5 py-0.5 font-medium animate-pulse">
+                ⚡ 正在重新分析全套 4 大板块 ({analysisProgress}%)
+              </Badge>
+              <h3 className="text-base font-bold text-slate-900">
+                正在深度重构您的专属医学保研材料
+              </h3>
+              <p className="text-xs text-slate-600 leading-relaxed min-h-[36px]">
+                {currentStageLog}
+              </p>
+            </div>
+
+            <div className="w-full bg-slate-100 rounded-full h-2.5 overflow-hidden">
+              <div
+                className="bg-gradient-to-r from-teal-500 via-indigo-500 to-teal-500 h-2.5 rounded-full transition-all duration-300"
+                style={{ width: `${analysisProgress}%` }}
+              />
+            </div>
+
+            <div className="flex items-center justify-between text-[11px] text-slate-500 pt-1 border-t border-slate-100">
+              <span>耗时：{elapsedSeconds} 秒</span>
+              <span>阶段：{currentStageIdx + 1} / 6</span>
+              <span>100% 依据您的真实输入</span>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
+

@@ -23,6 +23,7 @@ interface MedicalState {
   updateOptimizedPSSection: (index: number, text: string) => void;
   updateFullOptimizedPS: (text: string) => void;
   updateEmailDraft: (bodyText: string) => void;
+  clearAllInputs: () => void;
   reset: () => void;
 }
 
@@ -135,6 +136,16 @@ export const useMedicalStore = create<MedicalState>()(
           };
         }),
 
+      clearAllInputs: () =>
+        set({
+          medicalInput: { ...defaultUserInput },
+          analysisResult: null,
+          activePresetId: null,
+          activeTab: "input",
+          isAnalyzing: false,
+          analysisError: null,
+        }),
+
       reset: () =>
         set({
           medicalInput: defaultUserInput,
@@ -156,7 +167,33 @@ export const useMedicalStore = create<MedicalState>()(
       onRehydrateStorage: () => (state) => {
         if (state) {
           const currentInput = { ...(state.medicalInput || {}) };
-          // If stored input has old default mock values that user never typed, clean them up
+
+          // If stored input contains legacy preset mock data, wipe clean to prevent contamination of user results
+          const isPresetSampleData =
+            currentInput.name === "周思敏" ||
+            currentInput.name === "陈书涵" ||
+            currentInput.name === "林逸舟" ||
+            (Boolean(currentInput.originalPS) &&
+              (currentInput.originalPS.includes("周思敏") ||
+                currentInput.originalPS.includes("2.4万人") ||
+                currentInput.originalPS.includes("2.4 万"))) ||
+            (Boolean(currentInput.originalResume) &&
+              (currentInput.originalResume.includes("周思敏") ||
+                currentInput.originalResume.includes("2.4万人") ||
+                currentInput.originalResume.includes("2.4 万"))) ||
+            (Boolean(currentInput.mentorName) &&
+              (currentInput.mentorName.includes("高建华") ||
+                currentInput.mentorName.includes("李维新") ||
+                currentInput.mentorName.includes("沈宏宇")));
+
+          if (isPresetSampleData) {
+            state.medicalInput = { ...defaultUserInput };
+            state.analysisResult = null;
+            state.activePresetId = null;
+            state.activeTab = "input";
+            return;
+          }
+
           if (
             !state.activePresetId &&
             currentInput.targetUniversity === "北京大学公共卫生学院" &&
@@ -175,6 +212,7 @@ export const useMedicalStore = create<MedicalState>()(
             originalPS: currentInput.originalPS || "",
             originalResume: currentInput.originalResume || "",
           };
+
           if (state.analysisResult) {
             state.analysisResult = enrichMedicalResult(state.analysisResult, state.medicalInput);
           }
@@ -183,3 +221,4 @@ export const useMedicalStore = create<MedicalState>()(
     }
   )
 );
+
