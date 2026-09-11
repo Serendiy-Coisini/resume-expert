@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { Sparkles, Brain, LayoutGrid, ShieldCheck, Zap, Settings, Stethoscope } from "lucide-react";
+import { Sparkles, Brain, LayoutGrid, ShieldCheck, Zap, Settings } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 export function HeroSection() {
@@ -22,20 +22,10 @@ export function HeroSection() {
 
         <nav className="hidden md:flex items-center gap-8 text-slate-100 text-base font-semibold">
           <a href="#features" className="hover:text-blue-400 transition-colors">核心功能</a>
-          <Link href="/medical" className="flex items-center gap-1 text-teal-300 hover:text-teal-200 transition-colors">
-            <Stethoscope className="w-4 h-4" />
-            <span>医学生保研专区</span>
-          </Link>
           <a href="#faq" className="hover:text-blue-400 transition-colors">常见问题</a>
         </nav>
 
         <div className="flex items-center gap-3">
-          <Link href="/medical">
-            <Button variant="outline" className="bg-teal-950/60 border-teal-500/50 text-teal-200 hover:bg-teal-900/60 font-semibold h-11 px-4 gap-1.5 shadow-sm">
-              <Stethoscope className="w-4 h-4 text-teal-400" />
-              <span>医学生保研</span>
-            </Button>
-          </Link>
           <Link href="/settings">
             <Button variant="outline" className="bg-slate-900 border-slate-700 text-slate-100 hover:bg-slate-800 font-semibold h-11 px-5 gap-2">
               <Settings className="w-4 h-4 text-blue-400" />
@@ -64,22 +54,16 @@ export function HeroSection() {
           结合目标岗位 JD 深度诊断、智能匹配技能差距、启发挖掘经历细节、一键重构高含金量 Bullet 点，助你斩获更多心仪 Offer。
         </p>
 
-        <div className="mt-10 flex flex-wrap gap-4 justify-center">
+        <div className="mt-10 flex flex-wrap gap-5 justify-center">
           <Link href="/expert">
-            <Button size="lg" className="bg-blue-600 hover:bg-blue-500 text-white font-bold h-14 px-8 text-base sm:text-lg gap-2.5 rounded-xl shadow-xl shadow-blue-600/30 transition-all hover:scale-105">
-              <Brain className="w-5 h-5 text-white" /> 岗位简历 AI 优化
-            </Button>
-          </Link>
-
-          <Link href="/medical">
-            <Button size="lg" className="bg-gradient-to-r from-teal-600 to-cyan-600 hover:from-teal-500 hover:to-cyan-500 text-white font-bold h-14 px-8 text-base sm:text-lg gap-2.5 rounded-xl shadow-xl shadow-teal-600/30 transition-all hover:scale-105 border border-teal-400/30">
-              <Stethoscope className="w-5 h-5 text-teal-200" /> 🩺 医学生保研专区
+            <Button size="lg" className="bg-blue-600 hover:bg-blue-500 text-white font-bold h-14 px-9 text-lg gap-2.5 rounded-xl shadow-xl shadow-blue-600/30 transition-all hover:scale-105">
+              <Brain className="w-5 h-5 text-white" /> 立即使用 AI 诊断优化
             </Button>
           </Link>
 
           <Link href="/designer">
-            <Button size="lg" className="bg-slate-900 border border-slate-700 hover:bg-slate-800 text-slate-100 font-bold h-14 px-8 text-base sm:text-lg gap-2.5 rounded-xl shadow-md transition-all hover:scale-105">
-              <LayoutGrid className="w-5 h-5 text-purple-400" /> 自由设计器
+            <Button size="lg" className="bg-slate-900 border border-slate-700 hover:bg-slate-800 text-slate-100 font-bold h-14 px-9 text-lg gap-2.5 rounded-xl shadow-md transition-all hover:scale-105">
+              <LayoutGrid className="w-5 h-5 text-purple-400" /> 进入自由简历设计器
             </Button>
           </Link>
         </div>

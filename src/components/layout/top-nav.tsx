@@ -78,12 +78,6 @@ export function TopNav({ onMenuClick }: { onMenuClick?: () => void }) {
       </div>
 
       <div className="flex items-center gap-2">
-        <Link href="/medical">
-          <Button variant="outline" size="sm" className="h-8 text-xs gap-1.5 border-teal-200 bg-teal-50/50 hover:bg-teal-100/60 font-semibold text-teal-800">
-            <span>🩺 医学生保研</span>
-          </Button>
-        </Link>
-
         <Link href="/settings">
           <Button variant="outline" size="sm" className="h-8 text-xs gap-1.5 border-neutral-200 hover:bg-neutral-50 font-semibold text-neutral-700">
             <Settings className="h-3.5 w-3.5 text-blue-600" />

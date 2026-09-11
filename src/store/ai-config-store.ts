@@ -59,37 +59,19 @@ export const useAIConfigStore = create<AIConfigState>()(
 export function getUserAIConfig(): UserAIConfig | null {
   if (typeof window === "undefined") return null;
 
-  // 1. Check in-memory zustand store state first
-  try {
-    const storeCfg = useAIConfigStore.getState()?.config;
-    if (storeCfg && storeCfg.apiKey && storeCfg.apiKey.trim()) {
-      return {
-        apiKey: storeCfg.apiKey.trim(),
-        baseUrl: (storeCfg.baseUrl || "").trim(),
-        model: (storeCfg.model || "").trim(),
-        providerId: (storeCfg.providerId || "").trim(),
-        provider: (storeCfg.provider || "openai").trim(),
-      };
-    }
-  } catch {
-    // continue to localStorage fallback
-  }
-
-  // 2. Fallback to direct localStorage read
   try {
     const raw = localStorage.getItem("resume_expert_user_ai_config");
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      const cfg = parsed?.state?.config;
-      if (cfg && typeof cfg === "object" && cfg.apiKey?.trim()) {
-        return {
-          apiKey: cfg.apiKey.trim(),
-          baseUrl: (cfg.baseUrl || "").trim(),
-          model: (cfg.model || "").trim(),
-          providerId: (cfg.providerId || "").trim(),
-          provider: (cfg.provider || "openai").trim(),
-        };
-      }
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    const cfg = parsed?.state?.config;
+    if (cfg && typeof cfg === "object" && cfg.apiKey?.trim()) {
+      return {
+        apiKey: cfg.apiKey.trim(),
+        baseUrl: (cfg.baseUrl || "").trim(),
+        model: (cfg.model || "").trim(),
+        providerId: (cfg.providerId || "").trim(),
+        provider: (cfg.provider || "openai").trim(),
+      };
     }
   } catch {
     // ignore parse errors
