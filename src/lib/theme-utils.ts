@@ -66,6 +66,20 @@ export function hexToHsl(hex: string): { h: number; s: number; l: number } {
   };
 }
 
+export function getHexLuminance(hex: string): number {
+  const clean = hex.replace('#', '');
+  if (clean.length === 3) {
+    const r = parseInt(clean[0] + clean[0], 16) || 0;
+    const g = parseInt(clean[1] + clean[1], 16) || 0;
+    const b = parseInt(clean[2] + clean[2], 16) || 0;
+    return (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+  }
+  const r = parseInt(clean.substring(0, 2), 16) || 0;
+  const g = parseInt(clean.substring(2, 4), 16) || 0;
+  const b = parseInt(clean.substring(4, 6), 16) || 0;
+  return (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+}
+
 /**
  * Intelligently applies a new theme color to all themed elements across the Lego schema.
  */
@@ -93,24 +107,39 @@ export function applyThemeColorToSchema(schema: IHJSchema, newThemeColor: string
     let borderColor = widget.css.borderColor;
     let borderLeftColor = widget.css.borderLeftColor;
 
+    const isBannerBg = id.includes('banner-bg') || id.includes('header-bg') || title.includes('banner背景') || title.includes('顶栏背景');
+    const isBannerText = (id.includes('banner') || title.includes('banner')) && !isBannerBg;
+
     // 1. Corporate Banner & Background Blocks
-    if (id.includes('banner-bg') || id.includes('header-bg') || title.includes('banner背景') || title.includes('顶栏背景')) {
+    if (isBannerBg) {
       backgroundColor = newThemeColor;
       borderColor = newThemeColor;
     }
-    // 2. Section Titles & Headings
+    // 1.1 Text widgets positioned on top of the banner (Name, Contact info, intent)
+    else if (isBannerText) {
+      const isDarkBanner = getHexLuminance(newThemeColor) < 0.65;
+      if (id.includes('name') || title.includes('姓名')) {
+        fontColor = isDarkBanner ? '#ffffff' : '#0f172a';
+      } else {
+        fontColor = isDarkBanner ? '#f1f5f9' : '#334155';
+      }
+    }
+    // 2. Section Titles & Headings (Outside Banner)
     else if (
-      title.includes('标题') ||
-      id.includes('title') ||
-      (typeof widget.dataSource?.text === 'string' && widget.dataSource.text.startsWith('|')) ||
-      (typeof widget.dataSource?.text === 'string' && widget.dataSource.text.startsWith('// 0'))
+      !isBannerText &&
+      (
+        title.includes('标题') ||
+        id.includes('title') ||
+        (typeof widget.dataSource?.text === 'string' && widget.dataSource.text.startsWith('|')) ||
+        (typeof widget.dataSource?.text === 'string' && widget.dataSource.text.startsWith('// 0'))
+      )
     ) {
       if (widget.css.fontColor !== '#ffffff') {
         fontColor = newThemeColor;
       }
     }
-    // 3. Job Intent / Highlights
-    else if (id.includes('intent') || title.includes('求职意向') || title.includes('意向')) {
+    // 3. Job Intent / Highlights (Outside Banner)
+    else if (!isBannerText && (id.includes('intent') || title.includes('求职意向') || title.includes('意向'))) {
       if (widget.css.fontColor !== '#ffffff') {
         fontColor = newThemeColor;
       }

@@ -1,11 +1,27 @@
 import { NextResponse } from "next/server";
 import { getAIConfig } from "@/lib/ai/config";
 import { LLMError } from "@/lib/ai/client";
+import { checkRateLimit } from "@/lib/rate-limit";
 import type { OptimizeRequestBody } from "@/lib/ai/types";
 import { regenerateOptimizedItemsServer } from "@/services/ai/resumeAgent.server";
 
 export async function POST(request: Request) {
   try {
+    const rateLimit = checkRateLimit(request, { maxRequests: 15, windowMs: 60_000 });
+    if (!rateLimit.success) {
+      return NextResponse.json(
+        { error: `请求过于频繁，请等待 ${rateLimit.resetInSeconds} 秒后再试` },
+        {
+          status: 429,
+          headers: {
+            "Retry-After": String(rateLimit.resetInSeconds),
+            "X-RateLimit-Limit": String(rateLimit.limit),
+            "X-RateLimit-Remaining": String(rateLimit.remaining),
+          },
+        }
+      );
+    }
+
     const body = (await request.json()) as OptimizeRequestBody;
     const { input, style } = body;
 

@@ -52,7 +52,7 @@ export const WidgetRenderer: React.FC<WidgetRendererProps> = ({ widget }) => {
     whiteSpace: 'pre-wrap',
     wordBreak: 'break-word',
     display: 'flex',
-    alignItems: componentName.includes('text') || componentName.includes('rectangle') ? 'flex-start' : 'center',
+    alignItems: componentName.includes('text') ? 'flex-start' : 'center',
     justifyContent: css.textAlign === 'center' ? 'center' : css.textAlign === 'right' ? 'flex-end' : 'flex-start',
     overflow: isTextType ? 'visible' : 'hidden',
     position: 'relative'
@@ -184,13 +184,45 @@ export const WidgetRenderer: React.FC<WidgetRendererProps> = ({ widget }) => {
   }
 
   if (['hj-rectangle', 'hj-circle', 'hj-square', 'hj-oval', 'hj-triangle', 'hj-trapezoid', 'hj-parallelogram', 'hj-rhombus', 'hj-pentagon', 'hj-hexagon', 'hj-star', 'hj-leftArrow', 'hj-rightArrow', 'hj-cross', 'hj-message'].includes(componentName)) {
-    const shapeStyle = { ...style };
+    const isPillTag =
+      (componentName === 'hj-rectangle' || componentName === 'hj-oval') &&
+      (Number(css.borderRadius) >= 8 || Number(css.height) <= 36);
+
+    const shapeStyle: React.CSSProperties = {
+      ...style,
+      alignItems: isPillTag ? 'center' : (style.alignItems || 'center'),
+      justifyContent: isPillTag
+        ? (css.textAlign === 'left' ? 'flex-start' : css.textAlign === 'right' ? 'flex-end' : 'center')
+        : style.justifyContent
+    };
     if (clipPaths[componentName]) {
       shapeStyle.clipPath = clipPaths[componentName];
     }
     return (
       <div style={shapeStyle}>
-        {dataSource.text && <div style={{ maxWidth: '100%', wordBreak: 'break-word', overflowWrap: 'break-word', whiteSpace: 'pre-wrap', padding: '2px 4px' }}>{renderFormattedText(dataSource.text as string)}</div>}
+        {dataSource.text && (
+          <div
+            style={{
+              maxWidth: '100%',
+              wordBreak: isPillTag ? 'keep-all' : 'break-word',
+              overflowWrap: isPillTag ? 'normal' : 'break-word',
+              whiteSpace: isPillTag ? 'nowrap' : 'pre-wrap',
+              textOverflow: isPillTag ? 'ellipsis' : undefined,
+              overflow: isPillTag ? 'hidden' : undefined,
+              padding: isPillTag ? '0 10px' : '2px 4px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: isPillTag
+                ? (css.textAlign === 'left' ? 'flex-start' : css.textAlign === 'right' ? 'flex-end' : 'center')
+                : 'center',
+              width: isPillTag ? '100%' : undefined,
+              height: isPillTag ? '100%' : undefined,
+              lineHeight: 1
+            }}
+          >
+            {renderFormattedText(dataSource.text as string)}
+          </div>
+        )}
       </div>
     );
   }

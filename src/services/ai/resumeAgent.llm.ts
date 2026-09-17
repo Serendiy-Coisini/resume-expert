@@ -14,7 +14,17 @@ import {
   normalizeAnalysisResult,
   normalizeFollowUpQuestions,
   normalizeOptimizedItems,
+  updateFinalResumeWithOptimizedItems,
 } from "@/lib/ai/prompts";
+import {
+  buildJDAnalysis,
+  buildDiagnosis,
+  buildMatchItems,
+  buildFollowUpQuestions,
+  buildOptimizedItems,
+  buildFinalResume,
+  buildInterviewPrep,
+} from "@/services/ai/resumeAgent.mock";
 import type { FollowUpBulletEntry } from "@/lib/ai/prompts";
 import {
   bulletResponseSchema,
@@ -69,58 +79,182 @@ export async function runLLMResumeAnalysisStream(
   onStageUpdate?: (payload: StageUpdatePayload) => void,
   config?: AIConfig
 ): Promise<AnalysisResult> {
+  // Stage 1: JD Analysis with stage retry and local fallback
   onStageUpdate?.({ stage: "jd-analysis", status: "start" });
-  const jd = await chatCompletionJSON<JDAnalysisResult>({
-    system: RESUME_AGENT_SYSTEM_PROMPT,
-    user: buildAnalyzeCorePrompt(input),
-    maxTokens: 3000,
-    schema: jdAnalysisResponseSchema,
-  }, config);
+  let jdData: JDAnalysisResult["jdAnalysis"];
+  try {
+    const jd = await chatCompletionJSON<JDAnalysisResult>(
+      {
+        system: RESUME_AGENT_SYSTEM_PROMPT,
+        user: buildAnalyzeCorePrompt(input),
+        maxTokens: 3000,
+        schema: jdAnalysisResponseSchema,
+      },
+      config
+    );
+    jdData = jd.jdAnalysis;
+  } catch (err) {
+    console.warn("[runLLMResumeAnalysisStream] Stage 1 (jd-analysis) failed, retrying...", err);
+    try {
+      const jd = await chatCompletionJSON<JDAnalysisResult>(
+        {
+          system: RESUME_AGENT_SYSTEM_PROMPT,
+          user: buildAnalyzeCorePrompt(input),
+          maxTokens: 3000,
+          schema: jdAnalysisResponseSchema,
+        },
+        config
+      );
+      jdData = jd.jdAnalysis;
+    } catch (retryErr) {
+      console.warn("[runLLMResumeAnalysisStream] Stage 1 retry failed, degrading to local domain fallback:", retryErr);
+      jdData = buildJDAnalysis(input);
+    }
+  }
+
   onStageUpdate?.({
     stage: "jd-analysis",
     status: "complete",
-    data: { jdAnalysis: jd.jdAnalysis },
+    data: { jdAnalysis: jdData },
   });
 
+  // Stage 2: Diagnosis and Match with stage retry and local fallback
   onStageUpdate?.({ stage: "diagnosis", status: "start" });
-  const diagnosisMatch = await chatCompletionJSON<DiagnosisMatchResult>({
-    system: RESUME_AGENT_SYSTEM_PROMPT,
-    user: buildAnalyzeDiagnosisPrompt(input),
-    maxTokens: 4000,
-    schema: diagnosisMatchResponseSchema,
-  }, config);
+  let diagnosisMatchData: DiagnosisMatchResult;
+  try {
+    diagnosisMatchData = await chatCompletionJSON<DiagnosisMatchResult>(
+      {
+        system: RESUME_AGENT_SYSTEM_PROMPT,
+        user: buildAnalyzeDiagnosisPrompt(input),
+        maxTokens: 4000,
+        schema: diagnosisMatchResponseSchema,
+      },
+      config
+    );
+  } catch (err) {
+    console.warn("[runLLMResumeAnalysisStream] Stage 2 (diagnosis) failed, retrying...", err);
+    try {
+      diagnosisMatchData = await chatCompletionJSON<DiagnosisMatchResult>(
+        {
+          system: RESUME_AGENT_SYSTEM_PROMPT,
+          user: buildAnalyzeDiagnosisPrompt(input),
+          maxTokens: 4000,
+          schema: diagnosisMatchResponseSchema,
+        },
+        config
+      );
+    } catch (retryErr) {
+      console.warn("[runLLMResumeAnalysisStream] Stage 2 retry failed, degrading to local domain fallback:", retryErr);
+      diagnosisMatchData = {
+        diagnosis: buildDiagnosis(),
+        matchItems: buildMatchItems(),
+        followUpQuestions: buildFollowUpQuestions(),
+      };
+    }
+  }
 
-  const normalizedFollowUpQuestions = normalizeFollowUpQuestions(diagnosisMatch.followUpQuestions);
+  const normalizedFollowUpQuestions = normalizeFollowUpQuestions(diagnosisMatchData.followUpQuestions);
 
   onStageUpdate?.({
     stage: "diagnosis",
     status: "complete",
     data: {
-      diagnosis: diagnosisMatch.diagnosis,
-      matchItems: diagnosisMatch.matchItems,
+      diagnosis: diagnosisMatchData.diagnosis,
+      matchItems: diagnosisMatchData.matchItems,
       followUpQuestions: normalizedFollowUpQuestions,
     },
   });
 
-  const coreSummary = buildCoreSummary(diagnosisMatch);
+  const coreSummary = buildCoreSummary(diagnosisMatchData);
 
+  // Stage 3 & 4: Run concurrently with Promise.allSettled and isolated degradation
   onStageUpdate?.({ stage: "optimize", status: "start" });
-  const optimizeResumePromise = chatCompletionJSON<OptimizeResumeResult>({
-    system: RESUME_AGENT_SYSTEM_PROMPT,
-    user: buildAnalyzeOutputPrompt(input, optimizeStyle, coreSummary),
-    maxTokens: 4500,
-    schema: optimizeResumeResponseSchema,
-  }, config);
+  const optimizeTask = (async (): Promise<OptimizeResumeResult> => {
+    try {
+      return await chatCompletionJSON<OptimizeResumeResult>(
+        {
+          system: RESUME_AGENT_SYSTEM_PROMPT,
+          user: buildAnalyzeOutputPrompt(input, optimizeStyle, coreSummary),
+          maxTokens: 4500,
+          schema: optimizeResumeResponseSchema,
+        },
+        config
+      );
+    } catch (err) {
+      console.warn("[runLLMResumeAnalysisStream] Stage 3 (optimize) failed, retrying...", err);
+      try {
+        return await chatCompletionJSON<OptimizeResumeResult>(
+          {
+            system: RESUME_AGENT_SYSTEM_PROMPT,
+            user: buildAnalyzeOutputPrompt(input, optimizeStyle, coreSummary),
+            maxTokens: 4500,
+            schema: optimizeResumeResponseSchema,
+          },
+          config
+        );
+      } catch (retryErr) {
+        console.warn("[runLLMResumeAnalysisStream] Stage 3 retry failed, degrading to local optimize fallback:", retryErr);
+        const fallbackOptimizedItems = buildOptimizedItems(optimizeStyle);
+        const baseFinalResume = buildFinalResume(input);
+        const finalResume = updateFinalResumeWithOptimizedItems(baseFinalResume, fallbackOptimizedItems);
+        return {
+          optimizedItems: fallbackOptimizedItems,
+          finalResume,
+        };
+      }
+    }
+  })();
 
   onStageUpdate?.({ stage: "interview", status: "start" });
-  const interviewPromise = chatCompletionJSON<InterviewResult>({
-    system: RESUME_AGENT_SYSTEM_PROMPT,
-    user: buildAnalyzeInterviewPrompt(input, coreSummary),
-    maxTokens: 3500,
-    schema: interviewResponseSchema,
-  }, config);
+  const interviewTask = (async (): Promise<InterviewResult> => {
+    try {
+      return await chatCompletionJSON<InterviewResult>(
+        {
+          system: RESUME_AGENT_SYSTEM_PROMPT,
+          user: buildAnalyzeInterviewPrompt(input, coreSummary),
+          maxTokens: 3500,
+          schema: interviewResponseSchema,
+        },
+        config
+      );
+    } catch (err) {
+      console.warn("[runLLMResumeAnalysisStream] Stage 4 (interview) failed, retrying...", err);
+      try {
+        return await chatCompletionJSON<InterviewResult>(
+          {
+            system: RESUME_AGENT_SYSTEM_PROMPT,
+            user: buildAnalyzeInterviewPrompt(input, coreSummary),
+            maxTokens: 3500,
+            schema: interviewResponseSchema,
+          },
+          config
+        );
+      } catch (retryErr) {
+        console.warn("[runLLMResumeAnalysisStream] Stage 4 retry failed, degrading to local interview fallback:", retryErr);
+        return {
+          interviewPrep: buildInterviewPrep(),
+        };
+      }
+    }
+  })();
 
-  const [optimizeResume, interview] = await Promise.all([optimizeResumePromise, interviewPromise]);
+  const [optimizeSettled, interviewSettled] = await Promise.allSettled([optimizeTask, interviewTask]);
+
+  const optimizeResume: OptimizeResumeResult =
+    optimizeSettled.status === "fulfilled"
+      ? optimizeSettled.value
+      : {
+          optimizedItems: buildOptimizedItems(optimizeStyle),
+          finalResume: updateFinalResumeWithOptimizedItems(
+            buildFinalResume(input),
+            buildOptimizedItems(optimizeStyle)
+          ),
+        };
+
+  const interview: InterviewResult =
+    interviewSettled.status === "fulfilled"
+      ? interviewSettled.value
+      : { interviewPrep: buildInterviewPrep() };
 
   onStageUpdate?.({
     stage: "optimize",
@@ -140,9 +274,9 @@ export async function runLLMResumeAnalysisStream(
   });
 
   const raw: AnalysisResult = {
-    jdAnalysis: jd.jdAnalysis,
-    diagnosis: diagnosisMatch.diagnosis,
-    matchItems: diagnosisMatch.matchItems,
+    jdAnalysis: jdData,
+    diagnosis: diagnosisMatchData.diagnosis,
+    matchItems: diagnosisMatchData.matchItems,
     followUpQuestions: normalizedFollowUpQuestions,
     optimizedItems: optimizeResume.optimizedItems,
     finalResume: optimizeResume.finalResume,
@@ -152,21 +286,27 @@ export async function runLLMResumeAnalysisStream(
   return normalizeAnalysisResult(raw, input);
 }
 
-
 export async function runLLMRegenerateOptimizedItems(
   input: UserInput,
   style: OptimizeStyle,
   config?: AIConfig
 ): Promise<{ optimizedItems: AnalysisResult["optimizedItems"] }> {
-  const raw = await chatCompletionJSON<{ optimizedItems: AnalysisResult["optimizedItems"] }>({
-    system: RESUME_AGENT_SYSTEM_PROMPT,
-    user: buildOptimizeUserPrompt(input, style),
-    temperature: 0.5,
-    maxTokens: 4000,
-    schema: optimizedItemsResponseSchema,
-  }, config);
-
-  return { optimizedItems: normalizeOptimizedItems(raw.optimizedItems) };
+  try {
+    const raw = await chatCompletionJSON<{ optimizedItems: AnalysisResult["optimizedItems"] }>(
+      {
+        system: RESUME_AGENT_SYSTEM_PROMPT,
+        user: buildOptimizeUserPrompt(input, style),
+        temperature: 0.5,
+        maxTokens: 4000,
+        schema: optimizedItemsResponseSchema,
+      },
+      config
+    );
+    return { optimizedItems: normalizeOptimizedItems(raw.optimizedItems) };
+  } catch (err) {
+    console.warn("[runLLMRegenerateOptimizedItems] LLM call failed, degrading to local domain fallback:", err);
+    return { optimizedItems: buildOptimizedItems(style) };
+  }
 }
 
 export async function runLLMFollowUpBullet(

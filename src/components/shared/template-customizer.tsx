@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef } from "react";
-import { Check, Eye, SlidersHorizontal, Trash2, Upload, User } from "lucide-react";
+import { Check, Eye, ShieldCheck, SlidersHorizontal, Sparkles, Trash2, Upload, User } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useResumeStore } from "@/store/resume-store";
@@ -33,6 +33,9 @@ export function TemplateCustomizer() {
   const currentOptions: TemplateOptions = templateOptions || {
     themeColor: "#1e3a8a",
     avatarShape: "rectangle",
+    enableSmartPagination: true,
+    density: "normal",
+    pageMargin: "normal",
   };
 
   const updateOption = <K extends keyof TemplateOptions>(key: K, value: TemplateOptions[K]) => {
@@ -189,7 +192,132 @@ export function TemplateCustomizer() {
           </div>
         </div>
 
-        {/* Row 2: Direct Photo Upload/Replace Control in Customizer */}
+        {/* Row 2: Smart Pagination & Spacing Density (单页收敛与防截断) */}
+        <div className="flex flex-wrap items-center justify-between gap-3 pt-2.5 border-t border-blue-100/70">
+          {/* Smart Pagination Toggle */}
+          <div className="flex items-center gap-2">
+            <label className="text-[11px] font-semibold text-neutral-600 shrink-0 flex items-center gap-1">
+              <ShieldCheck className="w-3.5 h-3.5 text-blue-600" />
+              智能分页防截断：
+            </label>
+            <button
+              type="button"
+              onClick={() =>
+                updateOption(
+                  "enableSmartPagination",
+                  currentOptions.enableSmartPagination === false ? true : false
+                )
+              }
+              title="开启后自动通过 CSS break-inside/break-after 阻止标题孤行在页底、经历卡片不被硬截断、段落文本不被水平横切两半"
+              className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition-all flex items-center gap-1.5 border ${
+                currentOptions.enableSmartPagination !== false
+                  ? "bg-emerald-50 text-emerald-700 border-emerald-300 font-bold shadow-2xs hover:bg-emerald-100"
+                  : "bg-slate-100 text-slate-500 border-slate-300 hover:bg-slate-200"
+              }`}
+            >
+              <span
+                className={`w-2 h-2 rounded-full ${
+                  currentOptions.enableSmartPagination !== false
+                    ? "bg-emerald-500 animate-pulse"
+                    : "bg-slate-400"
+                }`}
+              />
+              <span>
+                {currentOptions.enableSmartPagination !== false
+                  ? "CSS 智能防截断 (已生效)"
+                  : "已关闭智能防截断"}
+              </span>
+            </button>
+          </div>
+
+          {/* Density & Spacing */}
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="flex items-center gap-1.5">
+              <label className="text-[11px] font-semibold text-neutral-600 shrink-0 flex items-center gap-1">
+                <Sparkles className="w-3 h-3 text-amber-500" />
+                排版紧凑度：
+              </label>
+              <div className="flex items-center gap-1 bg-white p-0.5 rounded-lg border border-neutral-200 shadow-2xs">
+                <button
+                  type="button"
+                  onClick={() => updateOption("density", "compact")}
+                  title="字号间距微调收紧，适合超出 1 页 2~5 行时一键收敛为精致单页"
+                  className={`px-2 py-0.5 rounded text-[11px] font-medium transition-all ${
+                    currentOptions.density === "compact"
+                      ? "bg-blue-600 text-white font-bold shadow-2xs"
+                      : "text-neutral-600 hover:bg-neutral-100"
+                  }`}
+                >
+                  紧凑 (冲刺单页)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => updateOption("density", "normal")}
+                  className={`px-2 py-0.5 rounded text-[11px] font-medium transition-all ${
+                    (currentOptions.density || "normal") === "normal"
+                      ? "bg-blue-600 text-white font-bold shadow-2xs"
+                      : "text-neutral-600 hover:bg-neutral-100"
+                  }`}
+                >
+                  标准
+                </button>
+                <button
+                  type="button"
+                  onClick={() => updateOption("density", "relaxed")}
+                  className={`px-2 py-0.5 rounded text-[11px] font-medium transition-all ${
+                    currentOptions.density === "relaxed"
+                      ? "bg-blue-600 text-white font-bold shadow-2xs"
+                      : "text-neutral-600 hover:bg-neutral-100"
+                  }`}
+                >
+                  宽松
+                </button>
+              </div>
+            </div>
+
+            {/* Margin */}
+            <div className="flex items-center gap-1.5">
+              <label className="text-[11px] font-semibold text-neutral-600 shrink-0">页边距：</label>
+              <div className="flex items-center gap-1 bg-white p-0.5 rounded-lg border border-neutral-200 shadow-2xs">
+                <button
+                  type="button"
+                  onClick={() => updateOption("pageMargin", "compact")}
+                  className={`px-1.5 py-0.5 rounded text-[10px] font-medium transition-all ${
+                    currentOptions.pageMargin === "compact"
+                      ? "bg-blue-600 text-white font-bold"
+                      : "text-neutral-600 hover:bg-neutral-100"
+                  }`}
+                >
+                  窄 (4mm)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => updateOption("pageMargin", "normal")}
+                  className={`px-1.5 py-0.5 rounded text-[10px] font-medium transition-all ${
+                    (currentOptions.pageMargin || "normal") === "normal"
+                      ? "bg-blue-600 text-white font-bold"
+                      : "text-neutral-600 hover:bg-neutral-100"
+                  }`}
+                >
+                  标准 (8mm)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => updateOption("pageMargin", "relaxed")}
+                  className={`px-1.5 py-0.5 rounded text-[10px] font-medium transition-all ${
+                    currentOptions.pageMargin === "relaxed"
+                      ? "bg-blue-600 text-white font-bold"
+                      : "text-neutral-600 hover:bg-neutral-100"
+                  }`}
+                >
+                  宽 (12mm)
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Row 3: Direct Photo Upload/Replace Control in Customizer */}
         <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-blue-100/70">
           <div className="flex items-center gap-3">
             <label className="text-[11px] font-semibold text-neutral-600 shrink-0">👤 简历照片：</label>

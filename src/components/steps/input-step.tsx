@@ -36,6 +36,7 @@ import { SectionTitle } from "@/components/shared/ui-helpers";
 import { runResumeAnalysisStream } from "@/services/ai/resumeAgent";
 import { useResumeStore } from "@/store/resume-store";
 import { getAIHeaders } from "@/store/ai-config-store";
+import { renderPdfPagesToImages } from "@/lib/pdf-to-images";
 import type { CompanyType, JobStage } from "@/types/resume";
 import { COMPANY_TYPE_OPTIONS, getCompanyTypeOption } from "@/lib/company-config";
 import { JOB_STAGE_OPTIONS, getJobStageOption } from "@/lib/job-stage-config";
@@ -258,12 +259,13 @@ export function InputStep() {
 
   const processResumeFile = async (file: File) => {
     const fileName = file.name.toLowerCase();
+    const isImage = file.type.startsWith("image/") || /\.(png|jpe?g|webp|bmp)$/i.test(fileName);
     const isPdf = file.type === "application/pdf" || fileName.endsWith(".pdf");
     const isWord = fileName.endsWith(".docx") || fileName.endsWith(".doc");
     const isTxt = fileName.endsWith(".txt");
 
-    if (!isPdf && !isWord && !isTxt) {
-      setPdfError("仅支持上传 PDF (.pdf)、Word (.docx / .doc) 或文本 (.txt) 格式文件");
+    if (!isPdf && !isWord && !isTxt && !isImage) {
+      setPdfError("仅支持上传 PDF (.pdf)、Word (.docx / .doc)、图片 (.png / .jpg) 或纯文本 (.txt) 格式文件");
       return;
     }
 
@@ -271,31 +273,96 @@ export function InputStep() {
     setPdfError(null);
 
     try {
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        const dataUrl = e.target?.result as string;
-        setUserInput({
-          rawFileName: file.name,
-          rawFileType: isPdf ? "pdf" : isWord ? "word" : "txt",
-          rawFileDataUrl: dataUrl,
-        });
-      };
-      reader.readAsDataURL(file);
-
-      const formData = new FormData();
-      formData.append("file", file);
-
-      const res = await fetch("/api/parse-pdf", {
-        method: "POST",
-        body: formData,
+      // Create memory-efficient blob URL to avoid Base64 memory bloat and localStorage QuotaExceededError
+      const blobUrl = URL.createObjectURL(file);
+      setUserInput({
+        rawFileName: file.name,
+        rawFileType: isPdf ? "pdf" : isWord ? "word" : isImage ? "image" : "txt",
+        rawFileDataUrl: blobUrl,
       });
 
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.error || "解析文件失败");
+      let extractedText = "";
+
+      if (isImage) {
+        const dataUrl = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result as string);
+          reader.onerror = reject;
+          reader.readAsDataURL(file);
+        });
+
+        const res = await fetch("/api/parse-resume-image", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...getAIHeaders(),
+          },
+          body: JSON.stringify({ images: [dataUrl] }),
+        });
+
+        const data = await res.json();
+        if (!res.ok || data.error) {
+          throw new Error(data.error || "未能从简历图片中识别提取文字");
+        }
+        extractedText = data.text || "";
+      } else if (isPdf) {
+        const formData = new FormData();
+        formData.append("file", file);
+
+        const res = await fetch("/api/parse-pdf", {
+          method: "POST",
+          body: formData,
+        });
+
+        const data = await res.json();
+
+        if (res.ok && data.text && data.text.trim().length >= 20) {
+          extractedText = data.text;
+        } else if (data.isScannedPdf || !data.text || data.text.trim().length < 20) {
+          // Vector/Scanned PDF fallback -> render pages to images and run Vision/OCR
+          const pageImages = await renderPdfPagesToImages(file, 4);
+          if (!pageImages || pageImages.length === 0) {
+            throw new Error("未能从 PDF 中提取出有效页面图像");
+          }
+
+          const visionRes = await fetch("/api/parse-resume-image", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              ...getAIHeaders(),
+            },
+            body: JSON.stringify({ images: pageImages }),
+          });
+
+          const visionData = await visionRes.json();
+          if (!visionRes.ok || visionData.error) {
+            throw new Error(visionData.error || "矢量/扫描版 PDF 提炼失败");
+          }
+          extractedText = visionData.text || "";
+        } else {
+          throw new Error(data.error || "解析文件失败");
+        }
+      } else {
+        const formData = new FormData();
+        formData.append("file", file);
+
+        const res = await fetch("/api/parse-pdf", {
+          method: "POST",
+          body: formData,
+        });
+
+        const data = await res.json();
+        if (!res.ok) {
+          throw new Error(data.error || "解析文件失败");
+        }
+        extractedText = data.text || "";
       }
 
-      setUserInput({ originalResume: data.text });
+      if (!extractedText.trim()) {
+        throw new Error("未能从文件中提取出有效文本，请确认文件内容或直接粘贴");
+      }
+
+      setUserInput({ originalResume: extractedText });
     } catch (err) {
       setPdfError(err instanceof Error ? err.message : "解析文件失败，请直接粘贴文本");
     } finally {
@@ -506,6 +573,19 @@ export function InputStep() {
                   <RotateCcw className="h-3.5 w-3.5 text-blue-600" />
                   🔄 一键切回 Mock 免费演示模式
                 </Button>
+                {analysisResult?.jdAnalysis && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => {
+                      setAnalysisError(null);
+                      setCurrentStep("jd-analysis");
+                    }}
+                    className="bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border-emerald-300 font-semibold text-xs gap-1.5 h-8 shadow-2xs"
+                  >
+                    📑 查看已完成的阶段分析 (前序 Token 成果已保留)
+                  </Button>
+                )}
               </div>
             </div>
           </div>
@@ -914,14 +994,14 @@ export function InputStep() {
             <div>
               <CardTitle className="text-sm">原始简历</CardTitle>
               <CardDescription>
-                支持拖拽 PDF / Word (.docx / .doc) 文件到框内直接上传，或点击按钮解析全文本
+                支持拖拽 PDF / Word (.docx / .doc) / 截图图片到框内直接上传，或点击按钮解析全文本
               </CardDescription>
             </div>
             <div>
               <input
                 ref={fileInputRef}
                 type="file"
-                accept=".pdf,.docx,.doc,.txt,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/msword,text/plain"
+                accept=".pdf,.docx,.doc,.txt,.png,.jpg,.jpeg,.webp,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/msword,text/plain,image/*"
                 className="hidden"
                 onChange={handlePdfUpload}
               />
@@ -935,12 +1015,12 @@ export function InputStep() {
                 {uploadingPdf ? (
                   <>
                     <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                    解析文件中...
+                    解析提炼中...
                   </>
                 ) : (
                   <>
                     <FileUp className="h-3.5 w-3.5" />
-                    上传 PDF / Word 简历
+                    上传 PDF / Word / 图片简历
                   </>
                 )}
               </Button>
@@ -951,7 +1031,7 @@ export function InputStep() {
               <div className="pointer-events-none absolute inset-0 z-20 flex flex-col items-center justify-center rounded-lg bg-blue-500/15 backdrop-blur-[2px]">
                 <div className="flex items-center gap-2.5 rounded-full bg-blue-600 px-5 py-2.5 text-sm font-medium text-white shadow-lg animate-bounce">
                   <FileUp className="h-4 w-4" />
-                  松开鼠标，自动解析 PDF / Word 简历
+                  松开鼠标，自动解析 PDF / Word / 图片简历
                 </div>
               </div>
             )}

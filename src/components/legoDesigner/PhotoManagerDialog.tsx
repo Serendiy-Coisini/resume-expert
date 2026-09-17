@@ -49,6 +49,7 @@ export const PhotoManagerDialog: React.FC<PhotoManagerDialogProps> = ({ open, on
   const [customWidth, setCustomWidth] = useState<number>(85);
   const [customHeight, setCustomHeight] = useState<number>(115);
   const [position, setPosition] = useState<AvatarPosition>('top-right');
+  const [positionChangedByUser, setPositionChangedByUser] = useState(false);
   const [borderWidth, setBorderWidth] = useState<number>(1);
   const [borderColor, setBorderColor] = useState<string>('#cbd5e1');
   const [hasShadow, setHasShadow] = useState<boolean>(true);
@@ -56,6 +57,7 @@ export const PhotoManagerDialog: React.FC<PhotoManagerDialogProps> = ({ open, on
   // Sync state when opened
   useEffect(() => {
     if (open) {
+      setPositionChangedByUser(false);
       const currentAvatar = schema.componentsTree[0]?.children.find(
         (w) => w.componentName.startsWith('hj-avatar') || w.id.includes('avatar') || (w.title || '').includes('头像') || (w.title || '').includes('照片')
       );
@@ -69,8 +71,10 @@ export const PhotoManagerDialog: React.FC<PhotoManagerDialogProps> = ({ open, on
       setAvatarSrc(src);
 
       if (currentAvatar) {
-        setCustomWidth(Number(currentAvatar.css.width) || 85);
-        setCustomHeight(Number(currentAvatar.css.height) || 115);
+        const w = Number(currentAvatar.css.width) || 85;
+        const h = Number(currentAvatar.css.height) || 115;
+        setCustomWidth(w);
+        setCustomHeight(h);
         setBorderWidth(Number(currentAvatar.css.borderWidth) || 1);
         setBorderColor((currentAvatar.css.borderColor as string) || '#cbd5e1');
 
@@ -79,6 +83,24 @@ export const PhotoManagerDialog: React.FC<PhotoManagerDialogProps> = ({ open, on
         else if (Number(currentAvatar.css.borderRadius) >= 40) setShape('circle');
         else if (Number(currentAvatar.css.borderRadius) === 0 || Number(currentAvatar.css.borderRadius) <= 2) setShape('square');
         else setShape('rounded');
+
+        if (w === 85 && h === 115) setSizePreset('1inch');
+        else if (w === 100 && h === 140) setSizePreset('2inch');
+        else if (w === 90 && h === 90) setSizePreset('square');
+        else if (w === 75 && h === 75) setSizePreset('compact');
+
+        // Detect current position of the existing avatar
+        const currentLeft = Number(currentAvatar.css.left) || 0;
+        const hasSidebar = schema.componentsTree[0]?.children.some(
+          (w) => (w.id || '').includes('sidebar') || (w.title || '').includes('边栏')
+        );
+        if (hasSidebar && currentLeft < 260) {
+          setPosition('sidebar');
+        } else if (currentLeft > 400) {
+          setPosition('top-right');
+        } else {
+          setPosition('top-left');
+        }
       } else {
         // Detect sidebar layout
         const hasSidebar = schema.componentsTree[0]?.children.some((w) => (w.id || '').includes('sidebar'));
@@ -174,16 +196,51 @@ export const PhotoManagerDialog: React.FC<PhotoManagerDialogProps> = ({ open, on
     const newSchema = JSON.parse(JSON.stringify(schema));
     const page = newSchema.componentsTree[0];
     const themeColor = (newSchema.css as Record<string, unknown>)?.themeColor as string || templateOptions.themeColor || '#1e3a8a';
+    const pageWidth = Number(newSchema.css?.width) || 820;
+
+    // Detect sidebar container if present
+    const sidebarBg = page.children.find(
+      (w: IWidget) => (w.id || '').includes('sidebar-bg') || (w.title || '').includes('边栏')
+    );
+
+    // Calculate target position based on recommended placement
+    let newLeft = 670;
+    let newTop = 30;
+
+    if (position === 'sidebar') {
+      if (sidebarBg) {
+        const sbLeft = Number(sidebarBg.css.left) || 20;
+        const sbWidth = Number(sidebarBg.css.width) || 250;
+        newLeft = Math.round(sbLeft + (sbWidth - customWidth) / 2);
+        newTop = 40;
+      } else {
+        newLeft = 97;
+        newTop = 40;
+      }
+    } else if (position === 'top-left') {
+      newLeft = 40;
+      newTop = 35;
+    } else {
+      // top-right
+      newLeft = pageWidth - 40 - customWidth;
+      newTop = 30;
+    }
 
     // Find existing avatar
     const existingIndex = page.children.findIndex(
       (w: IWidget) => w.componentName.startsWith('hj-avatar') || w.id.includes('avatar') || (w.title || '').includes('头像') || (w.title || '').includes('照片')
     );
 
+    let targetId = '';
+
     if (existingIndex >= 0) {
       // Update existing avatar widget
       const target = page.children[existingIndex];
       target.componentName = componentName;
+      if (positionChangedByUser) {
+        target.css.left = newLeft;
+        target.css.top = newTop;
+      }
       target.css.width = customWidth;
       target.css.height = customHeight;
       target.css.borderRadius = borderRadius;
@@ -194,25 +251,9 @@ export const PhotoManagerDialog: React.FC<PhotoManagerDialogProps> = ({ open, on
         ...target.dataSource,
         avatarSrc
       };
-      setSchema(newSchema, true);
-      setSelectedWidgetId(target.id);
+      targetId = target.id;
     } else {
       // Create new avatar widget
-      let newLeft = 670;
-      let newTop = 30;
-
-      if (position === 'sidebar') {
-        newLeft = 97;
-        newTop = 40;
-      } else if (position === 'top-left') {
-        newLeft = 30;
-        newTop = 30;
-      } else {
-        // top-right
-        newLeft = 820 - 30 - customWidth;
-        newTop = 30;
-      }
-
       const newAvatarWidget: IWidget = {
         id: `widget-avatar-${Date.now()}`,
         componentName,
@@ -234,24 +275,57 @@ export const PhotoManagerDialog: React.FC<PhotoManagerDialogProps> = ({ open, on
           avatarSrc
         }
       };
+      page.children.push(newAvatarWidget);
+      targetId = newAvatarWidget.id;
+    }
 
-      // Shrink header text widths if needed to avoid overlapping top-right avatar
+    // Layout adjustments for header/sidebar widgets if position was changed or new avatar
+    if (positionChangedByUser || existingIndex < 0) {
       if (position === 'top-right') {
         page.children.forEach((w: IWidget) => {
+          if (w.id === targetId || (w.id || '').includes('bg') || (w.title || '').includes('背景')) return;
           const wTop = Number(w.css.top) || 0;
           const wLeft = Number(w.css.left) || 0;
           const wWidth = Number(w.css.width) || 760;
 
-          if (wTop < 120 && wLeft < 200 && wLeft + wWidth > newLeft - 15) {
-            w.css.width = Math.max(200, newLeft - wLeft - 15);
+          if (wTop < 140) {
+            // If was previously shifted to right by top-left avatar, restore to left: 40
+            if (wLeft >= 130 && wLeft <= 200) {
+              w.css.left = 40;
+            }
+            if (Number(w.css.left) < 100 && Number(w.css.left) + wWidth > newLeft - 15) {
+              w.css.width = Math.max(200, newLeft - Number(w.css.left) - 15);
+            }
+          }
+        });
+      } else if (position === 'top-left') {
+        page.children.forEach((w: IWidget) => {
+          if (w.id === targetId || (w.id || '').includes('bg') || (w.title || '').includes('背景')) return;
+          const wTop = Number(w.css.top) || 0;
+          const wLeft = Number(w.css.left) || 0;
+
+          if (wTop < 140 && wLeft < newLeft + customWidth + 10) {
+            const shiftTo = newLeft + customWidth + 20;
+            w.css.left = shiftTo;
+            w.css.width = Math.max(200, pageWidth - 40 - shiftTo);
+          }
+        });
+      } else if (position === 'sidebar') {
+        // In sidebar layout, align sidebar name/intent widgets below avatar
+        page.children.forEach((w: IWidget) => {
+          if (w.id === targetId) return;
+          const wId = (w.id || '').toLowerCase();
+          if (wId === 'widget-name-sidebar') {
+            w.css.top = newTop + customHeight + 15;
+          } else if (wId === 'widget-intent-sidebar') {
+            w.css.top = newTop + customHeight + 55;
           }
         });
       }
-
-      page.children.push(newAvatarWidget);
-      setSchema(newSchema, true);
-      setSelectedWidgetId(newAvatarWidget.id);
     }
+
+    setSchema(newSchema, true);
+    setSelectedWidgetId(targetId);
 
     // Sync to store
     setUserInput({ avatarUrl: avatarSrc });
@@ -488,7 +562,10 @@ export const PhotoManagerDialog: React.FC<PhotoManagerDialogProps> = ({ open, on
                   </label>
                   <select
                     value={position}
-                    onChange={(e) => setPosition(e.target.value as AvatarPosition)}
+                    onChange={(e) => {
+                      setPosition(e.target.value as AvatarPosition);
+                      setPositionChangedByUser(true);
+                    }}
                     className="w-full bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-blue-500"
                   >
                     <option value="top-right">右上角 (单栏常用)</option>

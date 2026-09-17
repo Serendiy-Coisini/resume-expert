@@ -1,4 +1,5 @@
 import type { AIMode } from "@/lib/ai/types";
+import { validateAndSanitizeBaseUrl } from "@/lib/ai/ssrf";
 
 export interface AIConfig {
   mode: AIMode;
@@ -13,25 +14,36 @@ export function getAIConfig(req?: Request): AIConfig {
   if (req) {
     const rawHeader = req.headers.get("x-llm-config");
     if (rawHeader) {
+      let parsed: {
+        apiKey?: string;
+        baseUrl?: string;
+        model?: string;
+        visionModel?: string;
+        provider?: string;
+        providerId?: string;
+      } | null = null;
       try {
-        const parsed = JSON.parse(decodeURIComponent(rawHeader));
-        if (parsed.apiKey && typeof parsed.apiKey === "string" && parsed.apiKey.trim()) {
-          const apiKey = parsed.apiKey.trim();
-          const baseUrl = (parsed.baseUrl?.trim() || "https://api.openai.com/v1").replace(/\/$/, "");
-          const model = parsed.model?.trim() || "deepseek-chat";
-          const visionModel = parsed.visionModel?.trim() || parsed.model?.trim() || model;
-          const provider = parsed.provider?.trim() || parsed.providerId?.trim() || "openai-compatible";
-          return {
-            mode: "llm",
-            apiKey,
-            baseUrl,
-            model,
-            visionModel,
-            provider,
-          };
-        }
+        parsed = JSON.parse(decodeURIComponent(rawHeader));
       } catch (err) {
         console.warn("[getAIConfig] Failed to parse x-llm-config header:", err);
+      }
+
+      if (parsed && parsed.apiKey && typeof parsed.apiKey === "string" && parsed.apiKey.trim()) {
+        const apiKey = parsed.apiKey.trim();
+        const rawBaseUrl = parsed.baseUrl?.trim() || "https://api.openai.com/v1";
+        // SSRF protection: throws if baseUrl is invalid or targets internal network
+        const baseUrl = validateAndSanitizeBaseUrl(rawBaseUrl);
+        const model = parsed.model?.trim() || "deepseek-chat";
+        const visionModel = parsed.visionModel?.trim() || parsed.model?.trim() || model;
+        const provider = parsed.provider?.trim() || parsed.providerId?.trim() || "openai-compatible";
+        return {
+          mode: "llm",
+          apiKey,
+          baseUrl,
+          model,
+          visionModel,
+          provider,
+        };
       }
     }
   }

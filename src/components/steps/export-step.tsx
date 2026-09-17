@@ -61,6 +61,7 @@ export function ExportStep() {
   const [compareLeftTab, setCompareLeftTab] = useState<"file" | "text">("file");
   const [isWideLayout, setIsWideLayout] = useState<boolean>(true);
   const [activeLang, setActiveLang] = useState<"zh" | "en">("zh");
+  const [legoFullScreen, setLegoFullScreen] = useState(false);
   const avatarInputRef = useRef<HTMLInputElement | null>(null);
 
   const pdfBlobUrl = useMemo(() => {
@@ -162,33 +163,7 @@ export function ExportStep() {
   };
 
   const handleExportWord = async () => {
-    try {
-      const res = await fetch("/api/export/word", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ resume: currentResume }),
-      });
-      if (res.status === 403) {
-        const data = await res.json();
-        alert(data.error || "Word 导出为会员功能，请升级会员");
-        return;
-      }
-      if (!res.ok) {
-        // fallback to client-side export
-        exportResumeAsWord(currentResume, selectedTemplate, customTemplateHTML, templateOptions);
-        return;
-      }
-      const blob = await res.blob();
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `${currentResume.personalInfo.name || "简历"}_优化后.docx`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-    } catch {
-      exportResumeAsWord(currentResume, selectedTemplate, customTemplateHTML, templateOptions);
-    }
+    await exportResumeAsWord(currentResume, selectedTemplate, customTemplateHTML, templateOptions);
   };
 
 
@@ -242,7 +217,7 @@ export function ExportStep() {
           </button>
           <button
             type="button"
-            className={`px-2.5 sm:px-4 py-1.5 sm:py-2 rounded-lg text-[11px] sm:text-xs font-bold transition-all flex items-center justify-center gap-1 sm:gap-1.5 flex-1 sm:flex-initial ${
+            className={`px-2.5 sm:px-4 py-1.5 sm:py-2 rounded-lg text-[11px] sm:text-xs font-bold transition-all flex items-center justify-center gap-1 sm:gap-1.5 flex-1 sm:flex-initial cursor-pointer ${
               viewMode === "lego"
                 ? "bg-indigo-600 text-white shadow-md shadow-indigo-500/30 scale-[1.02]"
                 : "text-slate-600 hover:text-slate-900"
@@ -252,12 +227,35 @@ export function ExportStep() {
             <LayoutGrid className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
             <span>积木排版</span>
           </button>
+          {viewMode === "lego" && (
+            <button
+              type="button"
+              onClick={() => setLegoFullScreen(!legoFullScreen)}
+              className="px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-semibold bg-indigo-950/80 hover:bg-indigo-600 text-indigo-200 hover:text-white border border-indigo-700/60 transition-all flex items-center gap-1.5 cursor-pointer shadow-2xs active:scale-95 shrink-0"
+              title={legoFullScreen ? "退出全屏编辑 (ESC)" : "一键进入全屏沉浸式排版微调"}
+            >
+              {legoFullScreen ? (
+                <>
+                  <Minimize2 className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">退出全屏</span>
+                </>
+              ) : (
+                <>
+                  <Maximize2 className="w-3.5 h-3.5 text-indigo-400" />
+                  <span className="hidden sm:inline">全屏微调</span>
+                </>
+              )}
+            </button>
+          )}
         </div>
       </div>
 
       {viewMode === "lego" ? (
         <div className="-mx-4 sm:-mx-6 lg:-mx-8 -mb-6 h-[88vh] min-h-[750px]">
-          <LegoDesigner />
+          <LegoDesigner
+            isFullScreen={legoFullScreen}
+            onToggleFullScreen={() => setLegoFullScreen(!legoFullScreen)}
+          />
         </div>
       ) : viewMode === "compare" ? (
         <div className={isWideLayout ? "-mx-4 sm:-mx-6 lg:-mx-10 space-y-4" : "space-y-4"}>

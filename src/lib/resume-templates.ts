@@ -18,15 +18,153 @@ export interface TemplateConfig {
   color: string;
 }
 
+export type SpacingDensity = "compact" | "normal" | "relaxed";
+export type PageMarginSize = "compact" | "normal" | "relaxed";
+
 export interface TemplateOptions {
   themeColor?: string;
   avatarShape?: "rectangle" | "circle";
+  enableSmartPagination?: boolean;
+  density?: SpacingDensity;
+  pageMargin?: PageMarginSize;
 }
 
 export const DEFAULT_TEMPLATE_OPTIONS: TemplateOptions = {
   themeColor: "#1e3a8a",
   avatarShape: "rectangle",
+  enableSmartPagination: true,
+  density: "normal",
+  pageMargin: "normal",
 };
+
+export function getDensityValues(density: SpacingDensity = "normal") {
+  switch (density) {
+    case "compact":
+      return {
+        fontVal: "12.5px",
+        lhVal: "1.45",
+        secMT: "12px",
+        secMB: "4px",
+        itemMB: "8px",
+        ulMB: "4px",
+        liMB: "2px",
+      };
+    case "relaxed":
+      return {
+        fontVal: "14px",
+        lhVal: "1.65",
+        secMT: "22px",
+        secMB: "10px",
+        itemMB: "15px",
+        ulMB: "10px",
+        liMB: "5px",
+      };
+    case "normal":
+    default:
+      return {
+        fontVal: "13.5px",
+        lhVal: "1.56",
+        secMT: "18px",
+        secMB: "8px",
+        itemMB: "12px",
+        ulMB: "8px",
+        liMB: "4px",
+      };
+  }
+}
+
+export function getPageMarginValues(pageMargin: PageMarginSize = "normal") {
+  switch (pageMargin) {
+    case "compact":
+      return {
+        marginVal: "4mm",
+        bodyPadding: "4px 10px",
+      };
+    case "relaxed":
+      return {
+        marginVal: "12mm",
+        bodyPadding: "12px 20px",
+      };
+    case "normal":
+    default:
+      return {
+        marginVal: "8mm",
+        bodyPadding: "6px 14px",
+      };
+  }
+}
+
+export function getSmartPaginationCSS(options: TemplateOptions = DEFAULT_TEMPLATE_OPTIONS): string {
+  const isEnabled = options.enableSmartPagination !== false;
+  if (!isEnabled) {
+    return "";
+  }
+
+  return `
+    /* =======================================================
+       智能分页防截断核心规则集 (Smart Pagination & Anti-Truncation)
+       ======================================================= */
+    
+    /* 1. 标题与经历头部防孤行：严禁标题孤零零停留在页底，其紧随内容被切到下一页 */
+    .sec-title, .main-title, .sidebar-title, .sidebar-sec-title, .main-sec-title,
+    .item-head, .item-header, h1, h2, h3, h4, h5, h6 {
+      break-after: avoid !important;
+      page-break-after: avoid !important;
+      break-inside: avoid !important;
+      page-break-inside: avoid !important;
+    }
+
+    /* 2. 经历项、项目卡片、时间轴项、侧边栏独立区块防硬截断 */
+    .work-item, .project-item, .card-box, .tl-item, .sidebar-section {
+      break-inside: avoid !important;
+      page-break-inside: avoid !important;
+      -webkit-column-break-inside: avoid !important;
+    }
+
+    /* 3. 列表项与文字段落防腰斩：严禁单个汉字/文本行被跨页横向切成两半，控制孤行与寡行 */
+    li, p, .contact-item, .info-item, .skill-pill, .badge, .pill, .tag, .code-tag {
+      break-inside: avoid !important;
+      page-break-inside: avoid !important;
+      orphans: 2 !important;
+      widows: 2 !important;
+    }
+
+    /* 4. 图片、证件照与终端头防截断 */
+    img, .avatar-wrapper, .terminal-header, .banner {
+      break-inside: avoid !important;
+      page-break-inside: avoid !important;
+    }
+
+    /* 5. 打印环境跨页自适应安全修复：消除死锁高度引发的第2页以后被截断丢弃缺陷 */
+    @media print {
+      *, *::before, *::after {
+        -webkit-print-color-adjust: exact !important;
+        print-color-adjust: exact !important;
+      }
+      html, body {
+        width: 100% !important;
+        height: auto !important;
+        min-height: 100% !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        overflow: visible !important;
+        background: #ffffff !important;
+      }
+      .container, .layout-container {
+        height: auto !important;
+        min-height: 100% !important;
+        overflow: visible !important;
+      }
+      .sidebar, .main, .main-content {
+        height: auto !important;
+        overflow: visible !important;
+      }
+      .screen-only, .a4-page-guide {
+        display: none !important;
+      }
+    }
+  `;
+}
 
 export const TEMPLATES: TemplateConfig[] = [
   {
@@ -81,6 +219,67 @@ export const TEMPLATES: TemplateConfig[] = [
 ];
 
 /**
+ * Escapes HTML characters to prevent XSS attacks when interpolating user data into resume templates.
+ */
+export function escapeHtml(str: unknown): string {
+  if (str === null || str === undefined) return "";
+  return String(str)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
+export function sanitizeAvatarUrl(url?: string): string {
+  if (!url) return "";
+  const trimmed = url.trim();
+  if (
+    trimmed.startsWith("data:image/") ||
+    trimmed.startsWith("http://") ||
+    trimmed.startsWith("https://") ||
+    trimmed.startsWith("/")
+  ) {
+    return escapeHtml(trimmed);
+  }
+  return "";
+}
+
+function sanitizeResume(rawResume: FinalResume) {
+  const p = rawResume?.personalInfo || {};
+  return {
+    personalInfo: {
+      name: escapeHtml(p.name || "求职者"),
+      email: escapeHtml(p.email || ""),
+      phone: escapeHtml(p.phone || ""),
+      location: escapeHtml(p.location || ""),
+      avatarUrl: sanitizeAvatarUrl(p.avatarUrl),
+    },
+    jobIntent: escapeHtml(rawResume?.jobIntent || ""),
+    summary: escapeHtml(rawResume?.summary || ""),
+    coreSkills: (rawResume?.coreSkills || []).map((s) => escapeHtml(s)),
+    workExperience: (rawResume?.workExperience || []).map((w) => ({
+      company: escapeHtml(w.company || ""),
+      role: escapeHtml(w.role || ""),
+      period: escapeHtml(w.period || ""),
+      bullets: (w.bullets || []).map((b) => escapeHtml(b)),
+    })),
+    projectExperience: (rawResume?.projectExperience || []).map((pr) => ({
+      name: escapeHtml(pr.name || ""),
+      role: escapeHtml(pr.role || ""),
+      period: escapeHtml(pr.period || ""),
+      bullets: (pr.bullets || []).map((b) => escapeHtml(b)),
+    })),
+    skillsAndTools: (rawResume?.skillsAndTools || []).map((s) => escapeHtml(s)),
+    education: {
+      school: escapeHtml(rawResume?.education?.school || ""),
+      degree: escapeHtml(rawResume?.education?.degree || ""),
+      period: escapeHtml(rawResume?.education?.period || ""),
+    },
+  };
+}
+
+/**
  * Replaces placeholders in custom HTML templates.
  * Supports both English placeholders {{name}} and Chinese placeholders {{姓名}}.
  */
@@ -89,22 +288,7 @@ export function compileCustomTemplate(
   rawResume: FinalResume,
   options: TemplateOptions = DEFAULT_TEMPLATE_OPTIONS
 ): string {
-  const resume = {
-    personalInfo: {
-      name: rawResume?.personalInfo?.name || "求职者",
-      email: rawResume?.personalInfo?.email || "",
-      phone: rawResume?.personalInfo?.phone || "",
-      location: rawResume?.personalInfo?.location || "",
-      avatarUrl: rawResume?.personalInfo?.avatarUrl || "",
-    },
-    jobIntent: rawResume?.jobIntent || "",
-    summary: rawResume?.summary || "",
-    coreSkills: rawResume?.coreSkills || [],
-    workExperience: rawResume?.workExperience || [],
-    projectExperience: rawResume?.projectExperience || [],
-    skillsAndTools: rawResume?.skillsAndTools || [],
-    education: rawResume?.education || { school: "", degree: "", period: "" },
-  };
+  const resume = sanitizeResume(rawResume);
 
   const p = resume.personalInfo;
   const avatarUrl = p.avatarUrl || "";
@@ -253,6 +437,18 @@ export function compileCustomTemplate(
     .replace(/\{\{出生年月\}\}/gi, "")
     .replace(/\{\{出生日期\}\}/gi, "");
 
+  const smartPaginationCSS = getSmartPaginationCSS(options);
+  if (smartPaginationCSS) {
+    const styleTag = `<style>${smartPaginationCSS}</style>`;
+    if (compiled.includes("</head>")) {
+      compiled = compiled.replace("</head>", `${styleTag}</head>`);
+    } else if (compiled.includes("</body>")) {
+      compiled = compiled.replace("</body>", `${styleTag}</body>`);
+    } else {
+      compiled += styleTag;
+    }
+  }
+
   return compiled;
 }
 
@@ -299,36 +495,15 @@ function renderTemplateHTMLInternal(
   customTemplateHTML?: string,
   options: TemplateOptions = DEFAULT_TEMPLATE_OPTIONS
 ): string {
-  const resume = {
-    personalInfo: {
-      name: rawResume?.personalInfo?.name || "求职者",
-      email: rawResume?.personalInfo?.email || "",
-      phone: rawResume?.personalInfo?.phone || "",
-      location: rawResume?.personalInfo?.location || "",
-      avatarUrl: rawResume?.personalInfo?.avatarUrl || "",
-    },
-    jobIntent: rawResume?.jobIntent || "",
-    summary: rawResume?.summary || "",
-    coreSkills: rawResume?.coreSkills || [],
-    workExperience: rawResume?.workExperience || [],
-    projectExperience: rawResume?.projectExperience || [],
-    skillsAndTools: rawResume?.skillsAndTools || [],
-    education: rawResume?.education || { school: "", degree: "", period: "" },
-  };
+  const resume = sanitizeResume(rawResume);
 
   const p = resume.personalInfo;
   const avatarUrl = p.avatarUrl || "";
 
   const themeVal = options.themeColor || "#1e3a8a";
-  const fontVal = "13.5px";
-
-  const lhVal = "1.56";
-  const secMT = "18px";
-  const secMB = "8px";
-  const itemMB = "12px";
-  const ulMB = "8px";
-  const liMB = "4px";
-  const marginVal = "4mm";
+  const { fontVal, lhVal, secMT, secMB, itemMB, ulMB, liMB } = getDensityValues(options.density);
+  const { marginVal, bodyPadding } = getPageMarginValues(options.pageMargin);
+  const smartPaginationCSS = getSmartPaginationCSS(options);
 
   const isCircle = options.avatarShape === "circle";
   const avatarStyle = isCircle
@@ -353,19 +528,20 @@ function renderTemplateHTMLInternal(
         <meta charset="utf-8">
         <title>${p.name} - 个人简历</title>
         <style>
-          @page { size: A4; margin: ${marginVal}; }
+          @page { size: A4 portrait; margin: ${marginVal}; }
           * { box-sizing: border-box; }
-          body { font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif; font-size: ${fontVal}; line-height: ${lhVal}; color: #374151; margin: 0; padding: 6px 16px; background: #fff; word-break: break-word; overflow-wrap: break-word; }
+          body { font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif; font-size: ${fontVal}; line-height: ${lhVal}; color: #374151; margin: 0; padding: ${bodyPadding}; background: #fff; word-break: break-word; overflow-wrap: break-word; }
           .header { display: flex; justify-content: space-between; align-items: flex-end; border-bottom: 2px solid #059669; padding-bottom: 8px; margin-bottom: 14px; }
           .name { font-size: 24px; font-weight: 700; color: #065f46; letter-spacing: 0.5px; }
           .intent { font-size: 13px; font-weight: 600; color: #059669; margin-top: 2px; }
           .contact { font-size: 12px; color: #4b5563; text-align: right; }
           .sec-title { font-size: 15px; font-weight: 700; color: #065f46; border-left: 3px solid #059669; padding-left: 10px; margin-top: ${secMT}; margin-bottom: ${secMB}; text-transform: uppercase; letter-spacing: 0.5px; }
           .item-head { display: flex; justify-content: space-between; font-weight: 700; font-size: 13px; color: #111827; margin-top: 6px; }
-          .work-item, .project-item { margin-bottom: ${itemMB}; page-break-inside: avoid; break-inside: avoid; }
+          .work-item, .project-item, .card-box { margin-bottom: ${itemMB}; }
           ul { margin: 3px 0 ${ulMB} 0; padding-left: 18px; }
           li { margin-bottom: ${liMB}; color: #374151; line-height: ${lhVal}; }
           p { margin: 3px 0; line-height: ${lhVal}; }
+          ${smartPaginationCSS}
         </style>
       </head>
       <body>
@@ -426,9 +602,9 @@ function renderTemplateHTMLInternal(
         <meta charset="utf-8">
         <title>${p.name} - 个人简历</title>
         <style>
-          @page { size: A4; margin: ${marginVal}; }
+          @page { size: A4 portrait; margin: ${marginVal}; }
           * { box-sizing: border-box; }
-          body { font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif; font-size: ${fontVal}; line-height: ${lhVal}; color: #1e293b; margin: 0; padding: 6px 12px; background: #fff; word-break: break-word; overflow-wrap: break-word; }
+          body { font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif; font-size: ${fontVal}; line-height: ${lhVal}; color: #1e293b; margin: 0; padding: ${bodyPadding}; background: #fff; word-break: break-word; overflow-wrap: break-word; }
           .header { text-align: center; border-bottom: 2px solid ${themeVal}; padding-bottom: 8px; margin-bottom: 12px; }
           .name { font-size: 22px; font-weight: 700; color: ${themeVal}; margin-bottom: 4px; letter-spacing: 0.5px; }
           .intent { font-size: 12.5px; font-weight: 600; color: #475569; margin-bottom: 4px; }
@@ -436,11 +612,11 @@ function renderTemplateHTMLInternal(
           .sec-title { font-size: 13.5px; font-weight: 700; color: ${themeVal}; border-bottom: 1px solid #cbd5e1; padding-bottom: 3px; margin-top: ${secMT}; margin-bottom: ${secMB}; text-transform: uppercase; letter-spacing: 0.5px; }
           .item-head { display: flex; justify-content: space-between; font-weight: 700; font-size: 13px; color: #0f172a; margin-top: 6px; }
           .skill-pill { display: inline-block; background: #f1f5f9; color: #1e293b; border: 1px solid #e2e8f0; padding: 2px 8px; border-radius: 4px; font-size: 11.5px; margin: 2px 4px 2px 0; }
-          .work-item, .project-item { margin-bottom: ${itemMB}; page-break-inside: avoid; break-inside: avoid; }
+          .work-item, .project-item, .card-box { margin-bottom: ${itemMB}; }
           ul { margin: 3px 0 ${ulMB} 0; padding-left: 18px; }
           li { margin-bottom: ${liMB}; color: #334155; line-height: ${lhVal}; }
           p { margin: 3px 0; line-height: ${lhVal}; }
-          .card-box { page-break-inside: avoid; break-inside: avoid; }
+          ${smartPaginationCSS}
         </style>
       </head>
       <body>
@@ -500,9 +676,9 @@ function renderTemplateHTMLInternal(
         <meta charset="utf-8">
         <title>${p.name} - 个人简历</title>
         <style>
-          @page { size: A4; margin: ${marginVal}; }
+          @page { size: A4 portrait; margin: ${marginVal}; }
           * { box-sizing: border-box; }
-          body { font-family: "Fira Code", Consolas, Monaco, -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif; font-size: ${fontVal}; line-height: ${lhVal}; color: #334155; margin: 0; padding: 6px 12px; background: #fff; word-break: break-word; overflow-wrap: break-word; }
+          body { font-family: "Fira Code", Consolas, Monaco, -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif; font-size: ${fontVal}; line-height: ${lhVal}; color: #334155; margin: 0; padding: ${bodyPadding}; background: #fff; word-break: break-word; overflow-wrap: break-word; }
           .terminal-header { background: #0f172a; color: #f8fafc; border-radius: 6px; padding: 12px 16px; margin-bottom: 12px; font-family: monospace; display: flex; justify-content: space-between; align-items: center; }
           .prompt { color: #38bdf8; font-weight: bold; }
           .name { font-size: 20px; font-weight: 700; color: #f8fafc; margin-bottom: 4px; }
@@ -510,11 +686,11 @@ function renderTemplateHTMLInternal(
           .sec-title { font-size: 13px; font-weight: 700; color: ${themeVal}; border-left: 3px solid ${themeVal}; padding-left: 8px; margin-top: ${secMT}; margin-bottom: ${secMB}; font-family: monospace; }
           .item-head { display: flex; justify-content: space-between; font-weight: 600; font-size: 13px; color: #0f172a; margin-top: 6px; }
           .code-tag { display: inline-block; background: #f1f5f9; color: #0284c7; border: 1px solid #bae6fd; font-family: monospace; padding: 2px 7px; border-radius: 4px; font-size: 11.5px; margin: 2px 4px 2px 0; }
-          .work-item, .project-item { margin-bottom: ${itemMB}; page-break-inside: avoid; break-inside: avoid; }
+          .work-item, .project-item, .card-box { margin-bottom: ${itemMB}; }
           ul { margin: 3px 0 ${ulMB} 0; padding-left: 18px; }
           li { margin-bottom: ${liMB}; color: #334155; line-height: ${lhVal}; }
           p { margin: 3px 0; line-height: ${lhVal}; }
-          .card-box { page-break-inside: avoid; break-inside: avoid; }
+          ${smartPaginationCSS}
         </style>
       </head>
       <body>
@@ -576,7 +752,7 @@ function renderTemplateHTMLInternal(
         <meta charset="utf-8">
         <title>${p.name} - 个人简历</title>
         <style>
-          @page { size: A4; margin: ${marginVal}; }
+          @page { size: A4 portrait; margin: ${marginVal}; }
           * { box-sizing: border-box; }
           body {
             font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
@@ -584,7 +760,7 @@ function renderTemplateHTMLInternal(
             line-height: ${lhVal};
             color: #334155;
             margin: 0;
-            padding: 6px 12px;
+            padding: ${bodyPadding};
             background: #fff;
             word-break: break-word;
             overflow-wrap: break-word;
@@ -627,8 +803,6 @@ function renderTemplateHTMLInternal(
           .tl-item {
             position: relative;
             margin-bottom: ${itemMB};
-            page-break-inside: avoid;
-            break-inside: avoid;
           }
           .tl-item::before {
             content: "";
@@ -655,7 +829,8 @@ function renderTemplateHTMLInternal(
           ul { margin: 3px 0 ${ulMB} 0; padding-left: 18px; }
           li { margin-bottom: ${liMB}; color: #334155; line-height: ${lhVal}; }
           p { margin: 3px 0; line-height: ${lhVal}; }
-          .work-item, .project-item, .tl-item, .card-box { page-break-inside: avoid; break-inside: avoid; }
+          .work-item, .project-item, .card-box { margin-bottom: ${itemMB}; }
+          ${smartPaginationCSS}
         </style>
       </head>
       <body>
@@ -720,9 +895,9 @@ function renderTemplateHTMLInternal(
         <meta charset="utf-8">
         <title>${p.name} - 简历</title>
         <style>
-          @page { size: A4; margin: ${marginVal}; }
+          @page { size: A4 portrait; margin: ${marginVal}; }
           * { box-sizing: border-box; }
-          body { font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif; font-size: ${fontVal}; line-height: ${lhVal}; color: #1e293b; margin: 0; padding: 0; background: #fff; word-break: break-word; overflow-wrap: break-word; }
+          body { font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif; font-size: ${fontVal}; line-height: ${lhVal}; color: #1e293b; margin: 0; padding: ${bodyPadding}; background: #fff; word-break: break-word; overflow-wrap: break-word; }
           .banner { background: ${themeVal}; color: #fff; padding: 16px 20px; width: 100%; display: flex; justify-content: space-between; align-items: center; border-radius: 6px; }
           .name { font-size: 22px; font-weight: 700; margin-bottom: 4px; }
           .contact { font-size: 12px; color: #c7d2fe; }
@@ -730,11 +905,11 @@ function renderTemplateHTMLInternal(
           .sec-title { font-size: 13.5px; font-weight: 700; color: ${themeVal}; border-left: 4px solid ${themeVal}; padding-left: 8px; margin-top: ${secMT}; margin-bottom: ${secMB}; text-transform: uppercase; letter-spacing: 0.5px; }
           .item-head { display: flex; justify-content: space-between; font-weight: 600; font-size: 13.5px; margin-top: 6px; color: #0f172a; }
           .badge { display: inline-block; background: #f1f5f9; color: #334155; border: 1px solid #cbd5e1; padding: 2px 8px; border-radius: 4px; font-size: 11.5px; margin: 2px 4px 2px 0; }
-          .work-item, .project-item { margin-bottom: ${itemMB}; page-break-inside: avoid; break-inside: avoid; }
+          .work-item, .project-item, .card-box { margin-bottom: ${itemMB}; }
           ul { margin: 3px 0 ${ulMB} 0; padding-left: 18px; }
           li { margin-bottom: ${liMB}; color: #334155; line-height: ${lhVal}; }
           p { margin: 3px 0; line-height: ${lhVal}; }
-          .card-box { page-break-inside: avoid; break-inside: avoid; }
+          ${smartPaginationCSS}
         </style>
       </head>
       <body>
@@ -797,10 +972,10 @@ function renderTemplateHTMLInternal(
         <meta charset="utf-8">
         <title>${p.name} - 简历</title>
         <style>
-          @page { size: A4; margin: ${marginVal}; }
+          @page { size: A4 portrait; margin: ${marginVal}; }
           * { box-sizing: border-box; }
-          body { font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif; font-size: ${fontVal}; line-height: ${lhVal}; color: #334155; margin: 0; padding: 6px; background: #fff; word-break: break-word; overflow-wrap: break-word; }
-          .card-box { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 10px 14px; margin-bottom: ${itemMB}; page-break-inside: avoid; break-inside: avoid; }
+          body { font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif; font-size: ${fontVal}; line-height: ${lhVal}; color: #334155; margin: 0; padding: ${bodyPadding}; background: #fff; word-break: break-word; overflow-wrap: break-word; }
+          .card-box { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 10px 14px; margin-bottom: ${itemMB}; }
           .card-box:last-child { margin-bottom: 0 !important; }
           .name { font-size: 20px; font-weight: 700; color: #0f172a; }
           .contact { font-size: 12px; color: #64748b; margin-top: 3px; }
@@ -811,6 +986,7 @@ function renderTemplateHTMLInternal(
           ul { margin: 3px 0 ${ulMB} 0; padding-left: 18px; }
           li { margin-bottom: ${liMB}; color: #334155; line-height: ${lhVal}; }
           p { margin: 3px 0; line-height: ${lhVal}; }
+          ${smartPaginationCSS}
         </style>
       </head>
       <body>
@@ -878,27 +1054,27 @@ function renderTemplateHTMLInternal(
       <meta charset="utf-8">
       <title>${p.name} - 简历</title>
       <style>
-        @page { size: A4; margin: ${marginVal}; }
+        @page { size: A4 portrait; margin: ${marginVal}; }
         * { box-sizing: border-box; }
-        html, body { height: 100%; min-height: 100%; margin: 0; padding: 0; background: #fff; }
+        html, body { height: auto; min-height: 100%; margin: 0; padding: 0; background: #fff; }
         body { font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif; font-size: ${fontVal}; line-height: ${lhVal}; color: #334155; word-break: break-word; overflow-wrap: break-word; }
-        .container { display: table; width: 100%; height: 100%; min-height: 100%; table-layout: fixed; }
+        .container { display: table; width: 100%; height: auto; min-height: 100%; table-layout: fixed; }
         .sidebar { display: table-cell; width: 30%; background: #f8fafc; border-right: 1px solid #e2e8f0; padding: 12px 10px; vertical-align: top; }
         .main { display: table-cell; width: 70%; padding: 12px 14px; vertical-align: top; }
         .name { font-size: 20px; font-weight: 700; color: #0f172a; margin: 0 0 3px 0; }
         .role { font-size: 11.5px; font-weight: 600; color: ${themeVal}; margin-bottom: 12px; text-transform: uppercase; }
-        .sidebar-section { margin-bottom: 12px; page-break-inside: avoid; break-inside: avoid; }
+        .sidebar-section { margin-bottom: 12px; }
         .sidebar-title { font-size: 11.5px; font-weight: 700; color: #0f172a; text-transform: uppercase; letter-spacing: 0.5px; border-bottom: 2px solid ${themeVal}; padding-bottom: 3px; margin-bottom: 6px; }
         .contact-item { font-size: 11.5px; color: #475569; margin-bottom: 5px; word-break: break-all; }
         .badge { display: inline-block; background: #e0e7ff; color: #3730a3; padding: 2px 7px; border-radius: 4px; font-size: 11px; margin: 2px 2px 2px 0; }
         .main-title { font-size: 13.5px; font-weight: 700; color: #0f172a; border-bottom: 2px solid ${themeVal}; padding-bottom: 3px; margin-top: ${secMT}; margin-bottom: ${secMB}; text-transform: uppercase; letter-spacing: 0.5px; }
         .main-title:first-child { margin-top: 0; }
         .item-header { display: flex; justify-content: space-between; font-weight: 600; font-size: 13px; margin-top: 6px; color: #0f172a; }
-        .work-item, .project-item { margin-bottom: ${itemMB}; page-break-inside: avoid; break-inside: avoid; }
+        .work-item, .project-item, .card-box { margin-bottom: ${itemMB}; }
         ul { margin: 3px 0 ${ulMB} 0; padding-left: 16px; }
         li { margin-bottom: ${liMB}; color: #334155; line-height: ${lhVal}; }
         p { margin: 3px 0; line-height: ${lhVal}; }
-        .card-box { page-break-inside: avoid; break-inside: avoid; }
+        ${smartPaginationCSS}
       </style>
     </head>
     <body>
@@ -1041,8 +1217,26 @@ export const DEFAULT_CUSTOM_TEMPLATE_HTML = `<!DOCTYPE html>
     .main-sec-title:first-child {
       margin-top: 0;
     }
-    ul { margin: 6px 0 12px 0; padding-left: 18px; }
-    li { margin-bottom: 4px; color: #334155; }
+    @page { size: A4 portrait; margin: 8mm; }
+    .sidebar-sec-title, .main-sec-title, h1, h2, h3, h4, h5, h6 {
+      break-after: avoid !important;
+      page-break-after: avoid !important;
+      break-inside: avoid !important;
+      page-break-inside: avoid !important;
+    }
+    .info-item, ul, li, p {
+      break-inside: avoid !important;
+      page-break-inside: avoid !important;
+      orphans: 2 !important;
+      widows: 2 !important;
+    }
+    @media print {
+      html, body, .layout-container, .main-content, .sidebar {
+        height: auto !important;
+        min-height: 100% !important;
+        overflow: visible !important;
+      }
+    }
   </style>
 </head>
 <body>

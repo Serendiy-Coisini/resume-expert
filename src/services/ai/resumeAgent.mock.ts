@@ -18,7 +18,7 @@ const STYLE_LABELS: Record<OptimizeStyle, string> = {
   "tob-saas": "深度贴合目标 JD",
 };
 
-function buildJDAnalysis(input: UserInput): AnalysisResult["jdAnalysis"] {
+export function buildJDAnalysis(input: UserInput): AnalysisResult["jdAnalysis"] {
   const companyOpt = getCompanyTypeOption(input.companyType);
 
   return {
@@ -95,7 +95,7 @@ function buildJDAnalysis(input: UserInput): AnalysisResult["jdAnalysis"] {
   };
 }
 
-function buildDiagnosis(): AnalysisResult["diagnosis"] {
+export function buildDiagnosis(): AnalysisResult["diagnosis"] {
   return {
     overallScore: 58,
     dimensionScores: [
@@ -142,7 +142,7 @@ function buildDiagnosis(): AnalysisResult["diagnosis"] {
   };
 }
 
-function buildMatchItems(): AnalysisResult["matchItems"] {
+export function buildMatchItems(): AnalysisResult["matchItems"] {
   return [
     {
       jdRequirement: "3年以上产品经理经验",
@@ -203,7 +203,7 @@ function buildMatchItems(): AnalysisResult["matchItems"] {
   ];
 }
 
-function buildFollowUpQuestions(): AnalysisResult["followUpQuestions"] {
+export function buildFollowUpQuestions(): AnalysisResult["followUpQuestions"] {
   return [
     {
       id: "fu-1",
@@ -276,7 +276,7 @@ const ZHANG_MING_BULLETS = [
   },
 ];
 
-function buildOptimizedItems(
+export function buildOptimizedItems(
   style: OptimizeStyle = "concise"
 ): AnalysisResult["optimizedItems"] {
 
@@ -435,7 +435,7 @@ function buildOptimizedItems(
   ];
 }
 
-function buildFinalResume(input: UserInput): AnalysisResult["finalResume"] {
+export function buildFinalResume(input: UserInput): AnalysisResult["finalResume"] {
   return {
     personalInfo: {
       name: "张明",
@@ -522,7 +522,7 @@ function buildEnglishResume(input: UserInput): AnalysisResult["finalResume"] {
   return getOrBuildEnglishResume(baseResume, input);
 }
 
-function buildInterviewPrep(): AnalysisResult["interviewPrep"] {
+export function buildInterviewPrep(): AnalysisResult["interviewPrep"] {
   return {
     likelyQuestions: [
       {

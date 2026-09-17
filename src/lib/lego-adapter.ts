@@ -125,6 +125,480 @@ function calculateSummaryHeight(
   return Math.max(35, Math.ceil(totalLines * lineHeightPx + 14));
 }
 
+/**
+ * Accurately calculate required width for a skill pill / tag badge
+ * based on CJK fullwidth characters, Latin characters, symbols, and pill border radius padding.
+ */
+export function calculateTagWidth(text: string, fontSizePx: number = 11.5): number {
+  if (!text) return 72;
+  const clean = text.replace(/<[^>]+>/g, '').trim();
+  if (!clean) return 72;
+
+  let estimatedTextWidth = 0;
+  for (let i = 0; i < clean.length; i++) {
+    const code = clean.charCodeAt(i);
+    // CJK characters, fullwidth punctuation (e.g. （ ） ， 。 、), emojis
+    if (code > 0x2e80 || (code >= 0xff00 && code <= 0xffef)) {
+      estimatedTextWidth += fontSizePx * 1.08;
+    } else if (code >= 65 && code <= 90) {
+      // Uppercase Latin (e.g. SQL, ERP, PRD, MES)
+      estimatedTextWidth += fontSizePx * 0.75;
+    } else if (clean[i] === ' ' || clean[i] === '/' || clean[i] === '-' || clean[i] === '|') {
+      estimatedTextWidth += fontSizePx * 0.45;
+    } else {
+      // Lowercase Latin, digits, ASCII punctuation
+      estimatedTextWidth += fontSizePx * 0.62;
+    }
+  }
+
+  // Capsule round corner padding (at least 14px each side = 28px) + border (2px)
+  const horizontalPadding = Math.max(28, Math.ceil(fontSizePx * 2.4));
+  const totalWidth = Math.ceil(estimatedTextWidth + horizontalPadding);
+  return Math.max(72, Math.min(740, totalWidth));
+}
+
+export const A4_PAGE_HEIGHT = 1160;
+export const PAGE_SAFE_TOP_MARGIN = 35;
+export const PAGE_SAFE_BOTTOM_MARGIN = 35;
+
+/**
+ * 智能分页防截断：计算组件安全的 Y 轴起始位置。
+ * 若当前组件若放入当前页将导致底部穿透或严重逼近 A4 切割线 (k * 1160px)，
+ * 则将组件整体推进至下一页的起始安全边距位置。
+ */
+export function getSafePageBreakTop(
+  currentTop: number,
+  itemHeight: number,
+  pageHeight: number = A4_PAGE_HEIGHT,
+  topMargin: number = PAGE_SAFE_TOP_MARGIN,
+  bottomMargin: number = PAGE_SAFE_BOTTOM_MARGIN
+): number {
+  const pageIndex = Math.floor(currentTop / pageHeight);
+  const pageBoundary = (pageIndex + 1) * pageHeight;
+  const pageCutoff = pageBoundary - bottomMargin;
+
+  if (currentTop + itemHeight > pageCutoff) {
+    return pageBoundary + topMargin;
+  }
+  return currentTop;
+}
+
+/**
+ * 智能节标题防孤行计算：
+ * 保证节标题后必须能完整容纳至少一条经历卡片 (minFirstItemHeight)，
+ * 若容纳不下，则节标题整体下推至下一页顶部，杜绝孤行标题。
+ */
+export function getSafeSectionTitleTop(
+  currentTop: number,
+  titleHeight: number = 30,
+  minFirstItemHeight: number = 100,
+  pageHeight: number = A4_PAGE_HEIGHT,
+  topMargin: number = PAGE_SAFE_TOP_MARGIN,
+  bottomMargin: number = PAGE_SAFE_BOTTOM_MARGIN
+): number {
+  const pageIndex = Math.floor(currentTop / pageHeight);
+  const pageBoundary = (pageIndex + 1) * pageHeight;
+  const pageCutoff = pageBoundary - bottomMargin;
+
+  if (currentTop + titleHeight + minFirstItemHeight > pageCutoff) {
+    return pageBoundary + topMargin;
+  }
+  return currentTop;
+}
+
+/**
+ * 针对整个积木画布执行全局“一键智能分页防截断重排”
+ * 核心设计准则：
+ * 1. 结构化成组防截断：保持微部件（如单行内多个技能胶囊、卡片容器内的文字元素等）原有的横向与内部相对坐标，杜绝一维序列下推导致布局打乱或阶梯状倾斜。
+ * 2. 严禁标题孤行（Keep With Next）：节标题必须与该板块的首条内容卡片捆绑检验；若“标题 + 间距 + 首条内容”在当前页容纳不下，则标题整体移至下一页起始安全区，坚决杜绝“标题在上一页末尾、内容在下一页开头”的倒挂孤行。
+ * 3. 级联顺流推移（Cascade Shift）：未穿透切割线的内容完全保留原设计位置与呼吸感间隙；一旦前置组件因分页跨线而向下平移，后续所有板块严格同幅顺移。
+ * 4. 规范画布高度：画布总高严格收敛为 A4 整页倍数（totalPages * 1160px），不产生多余无意义空白页。
+ */
+export function reflowCanvasWidgetsForPagination(schema: IHJSchema): IHJSchema {
+  if (!schema || !schema.componentsTree || schema.componentsTree.length === 0) {
+    return schema;
+  }
+
+  const cloned: IHJSchema = JSON.parse(JSON.stringify(schema));
+  const page = cloned.componentsTree[0];
+  if (!page || !page.children || page.children.length === 0) {
+    return cloned;
+  }
+
+  const widgets = page.children;
+
+  const isTwoColumn = widgets.some(
+    (w) =>
+      (w.id || '').includes('sidebar-bg') ||
+      (w.title || '').includes('侧边栏') ||
+      ((Number(w.css.left) || 0) < 260 && (Number(w.css.height) || 0) > 600)
+  );
+
+  const sidebarBg = widgets.find(
+    (w) => (w.id || '').includes('sidebar-bg') || (w.title || '').includes('侧边栏')
+  );
+
+  // 通用流式结构化防截断与防孤行级联计算器
+  const reflowFlowWidgets = (flowWidgets: IWidget[]) => {
+    if (flowWidgets.length === 0) return;
+
+    // 记录原始 top 坐标，确保平移计算绝对幂等无累积误差
+    const origTops = new Map<string, number>();
+    flowWidgets.forEach((w) => {
+      origTops.set(w.id, Number(w.css.top) || 0);
+    });
+
+    const isSectionTitle = (w: IWidget): boolean => {
+      const id = (w.id || '').toLowerCase();
+      const title = (w.title || '').toLowerCase();
+      const text = typeof w.dataSource?.text === 'string' ? w.dataSource.text : '';
+      const comp = (w.componentName || '').toLowerCase();
+
+      if (id.includes('sidebar') || id.includes('banner') || id.includes('canvas')) return false;
+      if (comp === 'hj-circle') return false;
+      if (comp === 'hj-[#exper-1]') return false;
+      if ((Number(w.css.height) || 0) > 65) return false;
+
+      // 排除横向细分割线（属于伴随部件而非主标题文本）
+      if (comp === 'hj-rectangle' && (Number(w.css.height) || 0) <= 4 && (Number(w.css.width) || 0) >= 260) {
+        return false;
+      }
+
+      if (id.includes('sec-title') || id.includes('sec_title') || id.includes('-sec-')) return true;
+      if (
+        id.endsWith('-title') &&
+        (id.includes('corp-') || id.includes('work') || id.includes('proj') || id.includes('edu') || id.includes('skill') || id.includes('summary'))
+      ) {
+        return true;
+      }
+      if (title.includes('板块标题') || title.includes('模块标题')) return true;
+      if (comp === 'hj-text-8') return true;
+
+      const hasTitleKeyword = title.includes('标题') || id.includes('title');
+      const hasSectionKeyword =
+        title.includes('经历') ||
+        title.includes('技能') ||
+        title.includes('能力') ||
+        title.includes('教育') ||
+        title.includes('摘要') ||
+        title.includes('评价') ||
+        title.includes('优势') ||
+        title.includes('项目') ||
+        title.includes('工作') ||
+        title.includes('背景') ||
+        text.includes('经历') ||
+        text.includes('技能') ||
+        text.includes('教育') ||
+        text.includes('摘要') ||
+        text.includes('项目') ||
+        text.includes('工作') ||
+        text.includes('能力');
+
+      return hasTitleKeyword && hasSectionKeyword;
+    };
+
+    interface LayoutUnit {
+      id: string;
+      members: IWidget[];
+      origTop: number;
+      height: number;
+      isTitle: boolean;
+    }
+
+    const handledIds = new Set<string>();
+    const allUnits: LayoutUnit[] = [];
+
+    // 1. 抽取节标题及其紧邻的下划线/分割线
+    const rawTitles = flowWidgets.filter((w) => isSectionTitle(w));
+    rawTitles.sort((a, b) => (origTops.get(a.id) || 0) - (origTops.get(b.id) || 0));
+
+    rawTitles.forEach((tw) => {
+      const tTop = origTops.get(tw.id) || 0;
+      const tH = Number(tw.css.height) || 28;
+      handledIds.add(tw.id);
+
+      // 寻找相伴的下划线 / 分割线 (例如 widget-sec-line-*)
+      const accompanyingLines = flowWidgets.filter((lw) => {
+        if (handledIds.has(lw.id)) return false;
+        const lTop = origTops.get(lw.id) || 0;
+        const lH = Number(lw.css.height) || 0;
+        const isLine =
+          (lw.id || '').includes('sec-line') ||
+          (lw.id || '').includes('line-') ||
+          (lw.title || '').includes('分割线') ||
+          (lH <= 4 && (Number(lw.css.width) || 0) >= 260);
+        return isLine && Math.abs(lTop - (tTop + tH)) <= 15;
+      });
+
+      accompanyingLines.forEach((lw) => handledIds.add(lw.id));
+
+      const members = [tw, ...accompanyingLines];
+      const maxMemberBottom = Math.max(...members.map((m) => (origTops.get(m.id) || 0) + (Number(m.css.height) || 0)));
+      allUnits.push({
+        id: tw.id,
+        members,
+        origTop: tTop,
+        height: Math.max(tH, maxMemberBottom - tTop),
+        isTitle: true
+      });
+    });
+
+    // 2. 抽取大卡片背景容器 (如 grid-cards 的 widget-grid-*-bg-*)
+    const containerBgs = flowWidgets.filter(
+      (w) =>
+        !handledIds.has(w.id) &&
+        w.componentName === 'hj-rectangle' &&
+        (Number(w.css.width) || 0) >= 480 &&
+        (Number(w.css.height) || 0) >= 40
+    );
+
+    containerBgs.forEach((bg) => {
+      const bgTop = origTops.get(bg.id) || 0;
+      const bgH = Number(bg.css.height) || 60;
+      const insideWidgets = flowWidgets.filter((w) => {
+        if (w.id === bg.id || handledIds.has(w.id)) return false;
+        const wTop = origTops.get(w.id) || 0;
+        return wTop >= bgTop - 2 && wTop < bgTop + bgH;
+      });
+
+      handledIds.add(bg.id);
+      insideWidgets.forEach((w) => handledIds.add(w.id));
+
+      allUnits.push({
+        id: bg.id,
+        members: [bg, ...insideWidgets],
+        origTop: bgTop,
+        height: bgH,
+        isTitle: false
+      });
+    });
+
+    // 3. 抽取技能微标签组合（极为重要：技能标签整块绑定，禁止阶梯状逐一下推！）
+    const skillWidgets = flowWidgets.filter(
+      (w) =>
+        !handledIds.has(w.id) &&
+        ((w.id || '').includes('skill') || (w.title || '').includes('技能标签') || (w.title || '').includes('技能'))
+    );
+
+    if (skillWidgets.length > 0) {
+      skillWidgets.forEach((sw) => handledIds.add(sw.id));
+      const minSkillTop = Math.min(...skillWidgets.map((sw) => origTops.get(sw.id) || 0));
+      const maxSkillBot = Math.max(...skillWidgets.map((sw) => (origTops.get(sw.id) || 0) + (Number(sw.css.height) || 0)));
+      allUnits.push({
+        id: 'skills-composite-block',
+        members: skillWidgets,
+        origTop: minSkillTop,
+        height: Math.max(30, maxSkillBot - minSkillTop),
+        isTitle: false
+      });
+    }
+
+    // 4. 抽取经历/项目卡片（含时间轴节点 dot）
+    flowWidgets.forEach((w) => {
+      if (handledIds.has(w.id)) return;
+      if ((w.id || '').includes('line-work') || (w.id || '').includes('line-proj') || (w.title || '').includes('时间轴线')) {
+        // 时间轴竖线排版后单独做端点延伸计算，不作为驱动块
+        return;
+      }
+
+      const wTop = origTops.get(w.id) || 0;
+      const wH = Number(w.css.height) || 30;
+
+      // 检测是否有伴随的时间轴圆点 (widget-tl-dot-*)
+      const dotW = flowWidgets.find(
+        (dot) => !handledIds.has(dot.id) && (dot.id || '').includes('dot') && Math.abs((origTops.get(dot.id) || 0) - wTop) < 18
+      );
+
+      const members = [w];
+      if (dotW) {
+        members.push(dotW);
+        handledIds.add(dotW.id);
+      }
+
+      handledIds.add(w.id);
+      allUnits.push({
+        id: w.id,
+        members,
+        origTop: wTop,
+        height: wH,
+        isTitle: false
+      });
+    });
+
+    // 5. 按照初始 top 排序所有单元
+    allUnits.sort((a, b) => a.origTop - b.origTop);
+
+    // 6. 构造“板块 (Section) -> 内容单元 (Items)”树形结构，建立标题对首项的前瞻保护
+    interface SectionGroup {
+      titleUnit?: LayoutUnit;
+      items: LayoutUnit[];
+      origTop: number;
+    }
+
+    const titleUnits = allUnits.filter((u) => u.isTitle);
+    const sections: SectionGroup[] = [];
+
+    if (titleUnits.length === 0) {
+      sections.push({
+        titleUnit: undefined,
+        items: allUnits,
+        origTop: allUnits.length > 0 ? allUnits[0].origTop : 0
+      });
+    } else {
+      // 头部未归入标题的单元（如顶部的自我评价）
+      const preItems = allUnits.filter((u) => !u.isTitle && u.origTop < titleUnits[0].origTop);
+      if (preItems.length > 0) {
+        sections.push({
+          titleUnit: undefined,
+          items: preItems,
+          origTop: preItems[0].origTop
+        });
+      }
+
+      for (let i = 0; i < titleUnits.length; i++) {
+        const curTitle = titleUnits[i];
+        const nextTitle = titleUnits[i + 1];
+        const sectionItems = allUnits.filter(
+          (u) => !u.isTitle && u.origTop >= curTitle.origTop && (!nextTitle || u.origTop < nextTitle.origTop)
+        );
+        sections.push({
+          titleUnit: curTitle,
+          items: sectionItems,
+          origTop: curTitle.origTop
+        });
+      }
+    }
+
+    // 7. 执行全局级联下推与防孤行校验
+    let currentShift = 0;
+
+    sections.forEach((sec) => {
+      // (1) 校验节标题及其首项 (Keep With Next 防孤行)
+      if (sec.titleUnit) {
+        const curTitleTop = sec.titleUnit.origTop + currentShift;
+        const titleH = sec.titleUnit.height;
+        const pageIndex = Math.floor(curTitleTop / A4_PAGE_HEIGHT);
+        const pageCutoff = (pageIndex + 1) * A4_PAGE_HEIGHT - PAGE_SAFE_BOTTOM_MARGIN;
+
+        // 前瞻检测：标题后必须能完整容纳首条内容单元
+        let minRequiredH = titleH;
+        if (sec.items.length > 0) {
+          const firstItem = sec.items[0];
+          const gapToFirst = Math.max(6, firstItem.origTop - (sec.titleUnit.origTop + titleH));
+          minRequiredH = titleH + gapToFirst + firstItem.height;
+        }
+
+        if (curTitleTop + minRequiredH > pageCutoff) {
+          // 当前页不足以展示“标题 + 首项”，标题整体避让推移至下一页起始安全区
+          const nextPageSafeTop = (pageIndex + 1) * A4_PAGE_HEIGHT + PAGE_SAFE_TOP_MARGIN;
+          const addedShift = nextPageSafeTop - curTitleTop;
+          currentShift += addedShift;
+        }
+
+        // 应用位移至标题及其伴随线
+        sec.titleUnit.members.forEach((m) => {
+          m.css.top = (origTops.get(m.id) ?? Number(m.css.top) ?? 0) + currentShift;
+        });
+      }
+
+      // (2) 逐项校验本板块内部的内容单元
+      sec.items.forEach((item) => {
+        const curItemTop = item.origTop + currentShift;
+        const itemH = item.height;
+        const pageIndex = Math.floor(curItemTop / A4_PAGE_HEIGHT);
+        const pageCutoff = (pageIndex + 1) * A4_PAGE_HEIGHT - PAGE_SAFE_BOTTOM_MARGIN;
+
+        const maxPageUsableH = A4_PAGE_HEIGHT - PAGE_SAFE_TOP_MARGIN - PAGE_SAFE_BOTTOM_MARGIN;
+
+        if (itemH > maxPageUsableH) {
+          // 超长巨型单组件：仅当其起始点不在页面顶部安全区附近时推进至新页面开头
+          const offsetInPage = curItemTop % A4_PAGE_HEIGHT;
+          if (offsetInPage > PAGE_SAFE_TOP_MARGIN + 20) {
+            const nextPageSafeTop = (pageIndex + 1) * A4_PAGE_HEIGHT + PAGE_SAFE_TOP_MARGIN;
+            const addedShift = nextPageSafeTop - curItemTop;
+            currentShift += addedShift;
+          }
+        } else if (curItemTop + itemH > pageCutoff) {
+          // 单元穿透 A4 切割线，整体推移至下一页起始安全区
+          const nextPageSafeTop = (pageIndex + 1) * A4_PAGE_HEIGHT + PAGE_SAFE_TOP_MARGIN;
+          const addedShift = nextPageSafeTop - curItemTop;
+          currentShift += addedShift;
+        }
+
+        // 应用位移至单元内所有成员（如技能胶囊矩阵、卡片背景及内部文字），保证相对布局绝对不变
+        item.members.forEach((m) => {
+          m.css.top = (origTops.get(m.id) ?? Number(m.css.top) ?? 0) + currentShift;
+        });
+      });
+    });
+
+    // 8. 重新连接与延伸时间轴竖线
+    ['work', 'proj'].forEach((prefix) => {
+      const lineW = page.children.find(
+        (w) => (w.id || '').includes(`line-${prefix}`) || (w.id || '').includes(`line_${prefix}`)
+      );
+      const sectionCards = page.children.filter(
+        (w) => (w.id || '').includes(`-${prefix}-`) || (w.id || '').includes(`_${prefix}_`)
+      );
+      if (lineW && sectionCards.length > 0) {
+        const minTop = Math.min(...sectionCards.map((c) => Number(c.css.top) || 9999));
+        const maxBot = Math.max(...sectionCards.map((c) => (Number(c.css.top) || 0) + (Number(c.css.height) || 0)));
+        lineW.css.top = minTop + 4;
+        lineW.css.height = Math.max(30, maxBot - minTop - 10);
+      }
+    });
+  };
+
+  if (isTwoColumn) {
+    // 双栏布局：右栏内容（left >= 270）顺流结构化重排
+    const rightWidgets = widgets.filter((w) => (Number(w.css.left) || 0) >= 270 && w !== sidebarBg);
+    reflowFlowWidgets(rightWidgets);
+
+    const contentWidgets = widgets.filter(
+      (w) => w !== sidebarBg && !((w.id || '').includes('sidebar-bg') || (w.title || '').includes('侧边栏背景'))
+    );
+    const maxBottom = Math.max(0, ...contentWidgets.map((w) => (Number(w.css.top) || 0) + (Number(w.css.height) || 0)));
+    const totalPages = Math.max(1, Math.ceil(maxBottom / A4_PAGE_HEIGHT));
+    const finalHeight = totalPages * A4_PAGE_HEIGHT;
+
+    cloned.css.height = finalHeight;
+    if (sidebarBg) {
+      sidebarBg.css.top = 20;
+      sidebarBg.css.height = finalHeight - 40;
+    }
+  } else {
+    // 单栏流式布局：Header 区域保持不变，Body 区域按结构化板块与内容块顺流避让
+    const bannerBgs = widgets.filter((w) => {
+      const id = (w.id || '').toLowerCase();
+      const title = (w.title || '').toLowerCase();
+      return id.includes('banner-bg') || id.includes('header-bg') || title.includes('banner') || title.includes('顶部背景');
+    });
+    bannerBgs.forEach((bg) => {
+      const currentH = Number(bg.css.height) || 125;
+      bg.css.height = Math.min(160, Math.max(110, currentH));
+    });
+
+    const headerWidgets = widgets.filter((w) => (Number(w.css.top) || 0) < 175);
+    const bodyWidgets = widgets.filter((w) => !headerWidgets.includes(w) && !bannerBgs.includes(w));
+
+    reflowFlowWidgets(bodyWidgets);
+
+    const contentWidgets = widgets.filter((w) => {
+      const id = (w.id || '').toLowerCase();
+      const title = (w.title || '').toLowerCase();
+      if (id.includes('sidebar-bg') || title.includes('侧边栏背景') || title.includes('背景框')) return false;
+      if (id.includes('canvas-bg') || title.includes('画布背景')) return false;
+      if ((Number(w.css.height) || 0) > 800 && (w.componentName === 'hj-rectangle' || w.componentName === 'hj-bg')) return false;
+      return true;
+    });
+    const maxBottom = Math.max(0, ...contentWidgets.map((w) => (Number(w.css.top) || 0) + (Number(w.css.height) || 0)));
+    const totalPages = Math.max(1, Math.ceil(maxBottom / A4_PAGE_HEIGHT));
+    cloned.css.height = totalPages * A4_PAGE_HEIGHT;
+  }
+
+  return cloned;
+}
+
 export function fillAiDataIntoExistingSchema(
   currentSchema: IHJSchema,
   userInput: UserInput,
@@ -203,13 +677,31 @@ export function fillAiDataIntoExistingSchema(
     const title = (widget.title || '').toLowerCase();
     const id = (widget.id || '').toLowerCase();
     const compName = (widget.componentName || '').toLowerCase();
-    if (compName.includes('avatar') || title.includes('头像') || id.includes('avatar')) {
+    if (compName.includes('avatar') || title.includes('头像') || id.includes('avatar') || title.includes('照片')) {
       widget.dataSource.avatarSrc = avatarUrl || '';
       markUsed(widget);
     }
   });
 
-  // 2. Name Widget
+  // 2. Composite Intent + Contact Widgets (e.g. '意向与联系方式' in corporate-banner)
+  // Must match BEFORE individual intent/contact widgets to prevent wiping out contact details!
+  page.children.filter(isUnused).forEach((widget) => {
+    const title = (widget.title || '').toLowerCase();
+    const id = (widget.id || '').toLowerCase();
+    const currentText = typeof widget.dataSource?.text === 'string' ? widget.dataSource.text : '';
+
+    if (
+      (title.includes('意向') && title.includes('联系')) ||
+      id.includes('intent-contact') ||
+      id.includes('contact-intent') ||
+      (currentText.includes('求职意向') && (currentText.includes('@') || currentText.includes('13') || currentText.includes('|')))
+    ) {
+      widget.dataSource.text = `求职意向：${jobIntent}\n${email}  |  ${phone}  |  ${location}`;
+      markUsed(widget);
+    }
+  });
+
+  // 3. Name Widget
   page.children.filter(isUnused).forEach((widget) => {
     const title = (widget.title || '').toLowerCase();
     const id = (widget.id || '').toLowerCase();
@@ -225,16 +717,16 @@ export function fillAiDataIntoExistingSchema(
     }
   });
 
-  // 3. Job Intent Widget
+  // 4. Dedicated Job Intent Widget (does NOT include contact)
   page.children.filter(isUnused).forEach((widget) => {
     const title = (widget.title || '').toLowerCase();
     const id = (widget.id || '').toLowerCase();
     const currentText = typeof widget.dataSource?.text === 'string' ? widget.dataSource.text : '';
 
-    if (title.includes('意向') || id.includes('intent')) {
+    if ((title.includes('意向') || id.includes('intent')) && !title.includes('联系') && !id.includes('contact')) {
       if (currentText.startsWith('🎯') || currentText.includes('🎯')) {
         widget.dataSource.text = `🎯 意向：${jobIntent}`;
-      } else if (currentText.startsWith('意向') || currentText.startsWith('求职意向')) {
+      } else if (currentText.startsWith('意向') || currentText.startsWith('求职意向') || currentText.startsWith('意向岗位')) {
         widget.dataSource.text = `求职意向：${jobIntent}`;
       } else {
         widget.dataSource.text = jobIntent;
@@ -243,7 +735,7 @@ export function fillAiDataIntoExistingSchema(
     }
   });
 
-  // 4. Contact / Basic Info Widget
+  // 5. Contact / Basic Info Widget
   page.children.filter(isUnused).forEach((widget) => {
     const title = (widget.title || '').toLowerCase();
     const id = (widget.id || '').toLowerCase();
@@ -253,7 +745,7 @@ export function fillAiDataIntoExistingSchema(
       if (currentText.includes('🏫') || currentText.includes('📞') || currentText.includes('✉️')) {
         widget.dataSource.text = `🏫 院校：${edu.school}\n📞 电话：${phone}\n✉️ 邮箱：${email}\n📍 城市：${location}`;
       } else if (currentText.includes('cat profile.json')) {
-        widget.dataSource.text = `$ cat profile.json | grep --intent="${jobIntent}"`;
+        widget.dataSource.text = `$ cat profile.json | grep --intent="${jobIntent}"\n${email} | ${phone} | ${location}`;
       } else if (currentText.includes('\n')) {
         widget.dataSource.text = `✉️ ${email}\n📱 ${phone}\n📍 ${location}`;
       } else {
@@ -263,7 +755,7 @@ export function fillAiDataIntoExistingSchema(
     }
   });
 
-  // 5. Summary / Profile Widget
+  // 6. Summary / Profile Widget
   page.children.filter(isUnused).forEach((widget) => {
     const title = (widget.title || '').toLowerCase();
     const id = (widget.id || '').toLowerCase();
@@ -284,13 +776,13 @@ export function fillAiDataIntoExistingSchema(
       const cardWidth = widget.css.width || 740;
       const fontSz = widget.css.fontSize || 12.5;
       const sumH = calculateSummaryHeight(summary, cardWidth, fontSz, 20);
-      widget.css.height = Math.min(220, Math.max(35, sumH));
+      widget.css.height = Math.min(240, Math.max(35, sumH));
       widget.dataSource.text = currentText.includes('【自我评价】') ? `【自我评价】\n${summary}` : summary;
       markUsed(widget);
     }
   });
 
-  // 6. Work Experience Widgets
+  // 7. Work Experience Widgets
   const workCandidates = page.children.filter(isUnused).filter((widget) => {
     const title = (widget.title || '').toLowerCase();
     const id = (widget.id || '').toLowerCase();
@@ -325,9 +817,16 @@ export function fillAiDataIntoExistingSchema(
     }
   });
 
-  if (workList.length > workCandidates.length && workCandidates.length > 0) {
+  // Remove excess work candidate widgets if incoming has fewer
+  if (workCandidates.length > workList.length) {
+    const excessIds = new Set(workCandidates.slice(workList.length).map((w) => w.id));
+    page.children = page.children.filter((w) => !excessIds.has(w.id));
+  } else if (workList.length > workCandidates.length && workCandidates.length > 0) {
     const templateWidget = workCandidates[workCandidates.length - 1];
     const insertIdx = page.children.indexOf(templateWidget);
+
+    let lastTop = Number(templateWidget.css.top) || 0;
+    let lastHeight = Number(templateWidget.css.height) || 100;
 
     for (let idx = workCandidates.length; idx < workList.length; idx++) {
       const w = workList[idx];
@@ -339,7 +838,7 @@ export function fillAiDataIntoExistingSchema(
       const extraWidget: IWidget = JSON.parse(JSON.stringify(templateWidget));
       extraWidget.id = `widget-work-extra-${idx}-${Date.now()}`;
       extraWidget.title = `工作 ${idx + 1}`;
-      extraWidget.css.top = (Number(templateWidget.css.top) || 0) + (idx - workCandidates.length + 1) * 0.1;
+      extraWidget.css.top = lastTop + lastHeight + 12;
       extraWidget.css.height = Math.max(65, cardH);
       extraWidget.dataSource.companyName = w.company;
       extraWidget.dataSource.jobTitle = w.role;
@@ -349,10 +848,13 @@ export function fillAiDataIntoExistingSchema(
 
       page.children.splice(insertIdx + 1 + (idx - workCandidates.length), 0, extraWidget);
       markUsed(extraWidget);
+
+      lastTop = extraWidget.css.top;
+      lastHeight = extraWidget.css.height;
     }
   }
 
-  // 7. Project Experience Widgets
+  // 8. Project Experience Widgets
   const projectCandidates = page.children.filter(isUnused).filter((widget) => {
     const title = (widget.title || '').toLowerCase();
     const id = (widget.id || '').toLowerCase();
@@ -385,9 +887,16 @@ export function fillAiDataIntoExistingSchema(
     }
   });
 
-  if (projectList.length > projectCandidates.length && projectCandidates.length > 0) {
+  // Remove excess project candidate widgets if incoming has fewer
+  if (projectCandidates.length > projectList.length) {
+    const excessIds = new Set(projectCandidates.slice(projectList.length).map((w) => w.id));
+    page.children = page.children.filter((w) => !excessIds.has(w.id));
+  } else if (projectList.length > projectCandidates.length && projectCandidates.length > 0) {
     const templateWidget = projectCandidates[projectCandidates.length - 1];
     const insertIdx = page.children.indexOf(templateWidget);
+
+    let lastTop = Number(templateWidget.css.top) || 0;
+    let lastHeight = Number(templateWidget.css.height) || 100;
 
     for (let idx = projectCandidates.length; idx < projectList.length; idx++) {
       const p = projectList[idx];
@@ -399,7 +908,7 @@ export function fillAiDataIntoExistingSchema(
       const extraWidget: IWidget = JSON.parse(JSON.stringify(templateWidget));
       extraWidget.id = `widget-project-extra-${idx}-${Date.now()}`;
       extraWidget.title = `项目 ${idx + 1}`;
-      extraWidget.css.top = (Number(templateWidget.css.top) || 0) + (idx - projectCandidates.length + 1) * 0.1;
+      extraWidget.css.top = lastTop + lastHeight + 12;
       extraWidget.css.height = Math.max(65, cardH);
       extraWidget.dataSource.companyName = p.name;
       extraWidget.dataSource.jobTitle = p.role;
@@ -409,10 +918,13 @@ export function fillAiDataIntoExistingSchema(
 
       page.children.splice(insertIdx + 1 + (idx - projectCandidates.length), 0, extraWidget);
       markUsed(extraWidget);
+
+      lastTop = extraWidget.css.top;
+      lastHeight = extraWidget.css.height;
     }
   }
 
-  // 8. Education Widget
+  // 9. Education Widget
   page.children.filter(isUnused).forEach((widget) => {
     const title = (widget.title || '').toLowerCase();
     const id = (widget.id || '').toLowerCase();
@@ -423,7 +935,8 @@ export function fillAiDataIntoExistingSchema(
         widget.dataSource.companyName = edu.school;
         widget.dataSource.jobTitle = `${edu.degree} · ${edu.period}`;
         widget.dataSource.workTime = edu.period;
-        widget.dataSource.workContent = `专业课程与研究成果`;
+        widget.dataSource.workContent = `主修专业与核心课程成果`;
+        widget.dataSource.text = `${edu.school} · ${edu.degree}\n${edu.period}`;
       } else {
         widget.dataSource.text = `${edu.school}  ·  ${edu.degree}  (${edu.period})`;
       }
@@ -431,7 +944,7 @@ export function fillAiDataIntoExistingSchema(
     }
   });
 
-  // 9. Skills & Tools Widget
+  // 10. Skills & Tools Widget with Auto-Flow Tag Grid
   const skillWidgets = page.children.filter(isUnused).filter((widget) => {
     const title = (widget.title || '').toLowerCase();
     const id = (widget.id || '').toLowerCase();
@@ -452,15 +965,60 @@ export function fillAiDataIntoExistingSchema(
     widget.css.height = Math.max(26, calcH);
     markUsed(widget);
   } else if (skillWidgets.length > 1) {
-    skillWidgets.forEach((widget, sIdx) => {
-      const sk = skills[sIdx] || skills[sIdx % skills.length] || '';
-      widget.dataSource.text = sk;
-      if (widget.css.width && widget.css.width < 350) {
-        widget.css.width = Math.max(65, Math.min(260, Math.ceil(sk.length * 11 + 22)));
-        widget.css.height = 24;
-      }
-      markUsed(widget);
+    const sortedSkillWidgets = [...skillWidgets].sort((a, b) => {
+      const topDiff = (Number(a.css.top) || 0) - (Number(b.css.top) || 0);
+      if (Math.abs(topDiff) > 8) return topDiff;
+      return (Number(a.css.left) || 0) - (Number(b.css.left) || 0);
     });
+
+    const startLeft = Math.min(...sortedSkillWidgets.map((w) => Number(w.css.left) || 30));
+    const startTop = Math.min(...sortedSkillWidgets.map((w) => Number(w.css.top) || 200));
+    const isSidebar = startLeft < 250 && sortedSkillWidgets.every((w) => (Number(w.css.left) || 0) < 260);
+    const maxRight = isSidebar ? 250 : 770;
+    const tagGap = 8;
+    const rowStep = 34;
+
+    let curLeft = startLeft;
+    let curTop = startTop;
+
+    skills.forEach((sk, sIdx) => {
+      const fontSize = sortedSkillWidgets[0]?.css.fontSize || 11.5;
+      const tagW = calculateTagWidth(sk, fontSize);
+
+      if (curLeft > startLeft && curLeft + tagW > maxRight) {
+        curLeft = startLeft;
+        curTop += rowStep;
+      }
+
+      if (sIdx < sortedSkillWidgets.length) {
+        const w = sortedSkillWidgets[sIdx];
+        w.dataSource.text = sk;
+        w.css.left = curLeft;
+        w.css.top = curTop;
+        w.css.width = tagW;
+        w.css.height = 26;
+        markUsed(w);
+      } else {
+        const tmpl = sortedSkillWidgets[0];
+        const newPill: IWidget = JSON.parse(JSON.stringify(tmpl));
+        newPill.id = `widget-skill-extra-${sIdx}-${Date.now()}`;
+        newPill.title = `技能标签 ${sIdx + 1}`;
+        newPill.dataSource.text = sk;
+        newPill.css.left = curLeft;
+        newPill.css.top = curTop;
+        newPill.css.width = tagW;
+        newPill.css.height = 26;
+        page.children.push(newPill);
+        markUsed(newPill);
+      }
+
+      curLeft += tagW + tagGap;
+    });
+
+    if (skills.length < sortedSkillWidgets.length) {
+      const excessIds = new Set(sortedSkillWidgets.slice(skills.length).map((w) => w.id));
+      page.children = page.children.filter((w) => !excessIds.has(w.id));
+    }
   }
 
   // Clean remaining unused text placeholders containing sample names to prevent ghost text
@@ -470,6 +1028,7 @@ export function fillAiDataIntoExistingSchema(
       let updatedText = currentText;
       if (updatedText.includes('陈晨')) updatedText = updatedText.replace(/陈晨/g, name);
       if (updatedText.includes('张伟')) updatedText = updatedText.replace(/张伟/g, name);
+      if (updatedText.includes('张明')) updatedText = updatedText.replace(/张明/g, name);
       if (updatedText.includes('chenchen@design.com')) updatedText = updatedText.replace(/chenchen@design.com/g, email);
       if (updatedText.includes('137-0000-1111')) updatedText = updatedText.replace(/137-0000-1111/g, phone);
 
@@ -480,104 +1039,317 @@ export function fillAiDataIntoExistingSchema(
     }
   });
 
-  // Clamp right edge boundary for all widgets so no element spills past 780px
+  // Clamp right edge boundary for all widgets so no element spills past 785px
   page.children.forEach((widget) => {
     const wLeft = Number(widget.css.left) || 30;
     const wWidth = Number(widget.css.width) || 200;
-    if (wLeft + wWidth > 780) {
-      widget.css.width = Math.max(80, 780 - wLeft);
+    if (wLeft + wWidth > 785 && wLeft < 785) {
+      widget.css.width = Math.max(80, 785 - wLeft);
     }
   });
 
   // =========================================================================
-  // SMART 2D BOUNDING-BOX COLLISION & FLOW CASCADE (Prevent Overlapping Elements)
+  // INTELLIGENT SECTION-SEQUENCED VERTICAL FLOW (No Collisions, No Stretching)
   // =========================================================================
-  const isBackgroundWidget = (w: IWidget) => {
-    const id = (w.id || '').toLowerCase();
-    const title = (w.title || '').toLowerCase();
-    const zIndex = Number(w.css.zIndex) || 1;
-    const h = Number(w.css.height) || 0;
+  const isTwoColumn = page.children.some(
+    (w) =>
+      (w.id || '').includes('sidebar-bg') ||
+      (w.title || '').includes('侧边栏') ||
+      ((Number(w.css.left) || 0) < 260 && (Number(w.css.height) || 0) > 600)
+  );
 
-    return (
-      id.includes('sidebar-bg') ||
-      id.includes('banner-bg') ||
-      id.includes('card-bg') ||
-      title.includes('背景框') ||
-      title.includes('底色框') ||
-      (zIndex <= 1 && h >= 300)
+  let finalCanvasBottom = 1160;
+
+  if (isTwoColumn) {
+    // Two-column layout (modern-sidebar): Left column < 275, Right column >= 275
+    const rightWidgets = page.children.filter((w) => (Number(w.css.left) || 0) >= 270);
+    const sidebarBg = page.children.find(
+      (w) => (w.id || '').includes('sidebar-bg') || (w.title || '').includes('侧边栏')
     );
-  };
 
-  // Sort foreground widgets topologically by original top, then left
-  const foregroundWidgets = page.children
-    .filter((w) => !isBackgroundWidget(w))
-    .sort((a, b) => {
-      const topA = Number(a.css.top) || 0;
-      const topB = Number(b.css.top) || 0;
-      if (Math.abs(topA - topB) > 4) return topA - topB;
-      return (Number(a.css.left) || 0) - (Number(b.css.left) || 0);
+    // Group right column elements
+    const workTitle = rightWidgets.find(
+      (w) => (w.title || '').includes('工作') && (w.title || '').includes('标题')
+    );
+    const workCards = rightWidgets.filter((w) =>
+      workCandidates.some((c) => c.id === w.id)
+    );
+    const projTitle = rightWidgets.find(
+      (w) => (w.title || '').includes('项目') && (w.title || '').includes('标题')
+    );
+    const projCards = rightWidgets.filter((w) =>
+      projectCandidates.some((c) => c.id === w.id)
+    );
+    const skillsTitle = rightWidgets.find(
+      (w) => (w.title || '').includes('技能') && (w.title || '').includes('标题')
+    );
+    const skillsContent = rightWidgets.find((w) =>
+      skillWidgets.some((s) => s.id === w.id)
+    );
+    const eduTitle = rightWidgets.find(
+      (w) => (w.title || '').includes('教育') && (w.title || '').includes('标题')
+    );
+    const eduContent = rightWidgets.find(
+      (w) => (w.title || '').includes('教育') && !(w.title || '').includes('标题')
+    );
+
+    let curRightY = 40;
+    if (workTitle) {
+      const firstWorkH = workCards.length > 0 ? (Number(workCards[0].css.height) || 90) : 90;
+      curRightY = getSafeSectionTitleTop(curRightY, Number(workTitle.css.height) || 30, firstWorkH + 8);
+      workTitle.css.top = curRightY;
+      curRightY += (Number(workTitle.css.height) || 30) + 8;
+    }
+    workCards.forEach((c) => {
+      const cardH = Number(c.css.height) || 85;
+      curRightY = getSafePageBreakTop(curRightY, cardH);
+      c.css.top = curRightY;
+      curRightY += cardH + 14;
+    });
+    curRightY += 8;
+
+    if (projTitle) {
+      const firstProjH = projCards.length > 0 ? (Number(projCards[0].css.height) || 90) : 90;
+      curRightY = getSafeSectionTitleTop(curRightY, Number(projTitle.css.height) || 30, firstProjH + 8);
+      projTitle.css.top = curRightY;
+      curRightY += (Number(projTitle.css.height) || 30) + 8;
+    }
+    projCards.forEach((c) => {
+      const cardH = Number(c.css.height) || 85;
+      curRightY = getSafePageBreakTop(curRightY, cardH);
+      c.css.top = curRightY;
+      curRightY += cardH + 14;
+    });
+    curRightY += 8;
+
+    if (skillsTitle) {
+      curRightY = getSafeSectionTitleTop(curRightY, Number(skillsTitle.css.height) || 30, 50);
+      skillsTitle.css.top = curRightY;
+      curRightY += (Number(skillsTitle.css.height) || 30) + 8;
+    }
+    if (skillsContent) {
+      const skillsH = Number(skillsContent.css.height) || 50;
+      curRightY = getSafePageBreakTop(curRightY, skillsH);
+      skillsContent.css.top = curRightY;
+      curRightY += skillsH + 14;
+    }
+    curRightY += 8;
+
+    if (eduTitle) {
+      curRightY = getSafeSectionTitleTop(curRightY, Number(eduTitle.css.height) || 30, 45);
+      eduTitle.css.top = curRightY;
+      curRightY += (Number(eduTitle.css.height) || 30) + 8;
+    }
+    if (eduContent) {
+      const eduH = Number(eduContent.css.height) || 45;
+      curRightY = getSafePageBreakTop(curRightY, eduH);
+      eduContent.css.top = curRightY;
+      curRightY += eduH + 14;
+    }
+
+    const totalPages = Math.max(1, Math.ceil(curRightY / A4_PAGE_HEIGHT));
+    finalCanvasBottom = totalPages * A4_PAGE_HEIGHT;
+    if (sidebarBg) {
+      sidebarBg.css.top = 20;
+      sidebarBg.css.height = finalCanvasBottom - 40;
+    }
+  } else {
+    // Single-column layout (corporate-banner, classic-minimal, timeline-tech, minimal, github-tech, grid-cards)
+    // 1. Header Banner background MUST retain its designed height (NEVER expand to page bottom!)
+    const bannerBgs = page.children.filter((w) => {
+      const id = (w.id || '').toLowerCase();
+      const title = (w.title || '').toLowerCase();
+      return id.includes('banner-bg') || id.includes('header-bg') || title.includes('banner') || title.includes('顶部背景');
+    });
+    bannerBgs.forEach((bg) => {
+      const currentH = Number(bg.css.height) || 125;
+      bg.css.height = Math.min(160, Math.max(110, currentH));
     });
 
-  let maxCanvasBottom = 1160;
+    const headerWidgets = page.children.filter((w) => (Number(w.css.top) || 0) < 175);
+    const headerBottom = Math.max(150, ...headerWidgets.map((w) => (Number(w.css.top) || 0) + (Number(w.css.height) || 0)));
 
-  for (let i = 0; i < foregroundWidgets.length; i++) {
-    const curr = foregroundWidgets[i];
-    const currLeft = Number(curr.css.left) || 0;
-    const currWidth = Number(curr.css.width) || 200;
-    let currTop = Number(curr.css.top) || 0;
+    // 2. Identify and sequence body sections
+    const summaryWidgets = page.children.filter((w) => {
+      const id = (w.id || '').toLowerCase();
+      const title = (w.title || '').toLowerCase();
+      const t = Number(w.css.top) || 0;
+      return t >= 120 && (id.includes('sum') || id.includes('profile') || title.includes('摘要') || title.includes('优势') || title.includes('评价'));
+    });
 
-    for (let j = 0; j < i; j++) {
-      const prev = foregroundWidgets[j];
-      const prevLeft = Number(prev.css.left) || 0;
-      const prevWidth = Number(prev.css.width) || 200;
-      const prevTop = Number(prev.css.top) || 0;
-      const prevHeight = Number(prev.css.height) || 30;
-      const prevBottom = prevTop + prevHeight;
+    const skillsSectionWidgets = page.children.filter((w) => {
+      const id = (w.id || '').toLowerCase();
+      const title = (w.title || '').toLowerCase();
+      const t = Number(w.css.top) || 0;
+      return t >= 120 && (id.includes('skill') || title.includes('技能') || title.includes('工具')) && !title.includes('分割线');
+    });
 
-      // Check horizontal overlap with 4px tolerance
-      const hasHorizontalOverlap = Math.max(currLeft, prevLeft) < Math.min(currLeft + currWidth, prevLeft + prevWidth) - 4;
+    const workSectionWidgets = page.children.filter((w) => {
+      const id = (w.id || '').toLowerCase();
+      const title = (w.title || '').toLowerCase();
+      const t = Number(w.css.top) || 0;
+      return (
+        t >= 120 &&
+        !id.includes('proj') &&
+        !id.includes('edu') &&
+        !title.includes('项目') &&
+        !title.includes('教育') &&
+        (id.includes('work') || title.includes('工作') || title.includes('经历') || id.includes('tl-dot-work') || id.includes('line-work'))
+      );
+    });
 
-      if (hasHorizontalOverlap) {
-        const minGap = 8;
-        if (prevBottom + minGap > currTop) {
-          currTop = Math.ceil(prevBottom + minGap);
+    const projectSectionWidgets = page.children.filter((w) => {
+      const id = (w.id || '').toLowerCase();
+      const title = (w.title || '').toLowerCase();
+      const t = Number(w.css.top) || 0;
+      return (
+        t >= 120 &&
+        (id.includes('proj') || title.includes('项目') || id.includes('tl-dot-proj') || id.includes('line-proj'))
+      );
+    });
+
+    const eduSectionWidgets = page.children.filter((w) => {
+      const id = (w.id || '').toLowerCase();
+      const title = (w.title || '').toLowerCase();
+      const t = Number(w.css.top) || 0;
+      return t >= 120 && (id.includes('edu') || title.includes('教育'));
+    });
+
+    // Detect section order based on initial minTop
+    type SectionType = 'summary' | 'skills' | 'work' | 'project' | 'education';
+    const sections: { type: SectionType; minTop: number }[] = [
+      { type: 'summary' as SectionType, minTop: summaryWidgets.length > 0 ? Math.min(...summaryWidgets.map((w) => Number(w.css.top) || 999)) : 999 },
+      { type: 'skills' as SectionType, minTop: skillsSectionWidgets.length > 0 ? Math.min(...skillsSectionWidgets.map((w) => Number(w.css.top) || 999)) : 999 },
+      { type: 'work' as SectionType, minTop: workSectionWidgets.length > 0 ? Math.min(...workSectionWidgets.map((w) => Number(w.css.top) || 999)) : 999 },
+      { type: 'project' as SectionType, minTop: projectSectionWidgets.length > 0 ? Math.min(...projectSectionWidgets.map((w) => Number(w.css.top) || 999)) : 999 },
+      { type: 'education' as SectionType, minTop: eduSectionWidgets.length > 0 ? Math.min(...eduSectionWidgets.map((w) => Number(w.css.top) || 999)) : 999 },
+    ].filter((s) => s.minTop < 999).sort((a, b) => a.minTop - b.minTop);
+
+    let flowY = headerBottom + 16;
+
+    sections.forEach(({ type }) => {
+      if (type === 'summary' && summaryWidgets.length > 0) {
+        const titleW = summaryWidgets.find((w) => (w.title || '').includes('标题') || (w.id || '').includes('title'));
+        const contentW = summaryWidgets.find((w) => w !== titleW);
+        if (titleW) {
+          flowY = getSafeSectionTitleTop(flowY, Number(titleW.css.height) || 28, 50);
+          titleW.css.top = flowY;
+          flowY += (Number(titleW.css.height) || 28) + 6;
+        }
+        if (contentW) {
+          const cH = Number(contentW.css.height) || 50;
+          flowY = getSafePageBreakTop(flowY, cH);
+          contentW.css.top = flowY;
+          flowY += cH + 18;
+        }
+      } else if (type === 'skills' && skillsSectionWidgets.length > 0) {
+        const titleW = skillsSectionWidgets.find((w) => (w.title || '').includes('标题') || (w.id || '').includes('title'));
+        const nonTitle = skillsSectionWidgets.filter((w) => w !== titleW);
+        if (titleW) {
+          flowY = getSafeSectionTitleTop(flowY, Number(titleW.css.height) || 28, 40);
+          titleW.css.top = flowY;
+          flowY += (Number(titleW.css.height) || 28) + 8;
+        }
+        if (nonTitle.length === 1) {
+          const sH = Number(nonTitle[0].css.height) || 40;
+          flowY = getSafePageBreakTop(flowY, sH);
+          nonTitle[0].css.top = flowY;
+          flowY += sH + 18;
+        } else if (nonTitle.length > 1) {
+          // Flow tag pills smoothly
+          const startLeft = Math.min(...nonTitle.map((w) => Number(w.css.left) || 30));
+          let pillX = startLeft;
+          flowY = getSafePageBreakTop(flowY, 28);
+          let pillY = flowY;
+          nonTitle.forEach((pill) => {
+            const w = Number(pill.css.width) || 80;
+            if (pillX > startLeft && pillX + w > 770) {
+              pillX = startLeft;
+              pillY += 34;
+              pillY = getSafePageBreakTop(pillY, 28);
+            }
+            pill.css.left = pillX;
+            pill.css.top = pillY;
+            pillX += w + 8;
+          });
+          flowY = pillY + 34 + 16;
+        }
+      } else if (type === 'work' && workSectionWidgets.length > 0) {
+        const titleW = workSectionWidgets.find((w) => (w.title || '').includes('标题') || (w.id || '').includes('title'));
+        const cards = workSectionWidgets.filter((w) => workCandidates.some((c) => c.id === w.id));
+        const lineW = workSectionWidgets.find((w) => (w.id || '').includes('line-work'));
+        const dots = workSectionWidgets.filter((w) => (w.id || '').includes('dot-work'));
+
+        if (titleW) {
+          const firstWorkH = cards.length > 0 ? (Number(cards[0].css.height) || 90) : 90;
+          flowY = getSafeSectionTitleTop(flowY, Number(titleW.css.height) || 28, firstWorkH + 8);
+          titleW.css.top = flowY;
+          flowY += (Number(titleW.css.height) || 28) + 8;
+        }
+        const workLineStart = flowY + 4;
+        cards.forEach((card, idx) => {
+          const cardH = Number(card.css.height) || 80;
+          flowY = getSafePageBreakTop(flowY, cardH);
+          card.css.top = flowY;
+          const dot = dots[idx];
+          if (dot) dot.css.top = flowY + 6;
+          flowY += cardH + 12;
+        });
+        if (lineW) {
+          lineW.css.top = workLineStart;
+          lineW.css.height = Math.max(30, flowY - workLineStart - 10);
+        }
+        flowY += 8;
+      } else if (type === 'project' && projectSectionWidgets.length > 0) {
+        const titleW = projectSectionWidgets.find((w) => (w.title || '').includes('标题') || (w.id || '').includes('title'));
+        const cards = projectSectionWidgets.filter((w) => projectCandidates.some((c) => c.id === w.id));
+        const lineW = projectSectionWidgets.find((w) => (w.id || '').includes('line-proj'));
+        const dots = projectSectionWidgets.filter((w) => (w.id || '').includes('dot-proj'));
+
+        if (titleW) {
+          const firstProjH = cards.length > 0 ? (Number(cards[0].css.height) || 90) : 90;
+          flowY = getSafeSectionTitleTop(flowY, Number(titleW.css.height) || 28, firstProjH + 8);
+          titleW.css.top = flowY;
+          flowY += (Number(titleW.css.height) || 28) + 8;
+        }
+        const projLineStart = flowY + 4;
+        cards.forEach((card, idx) => {
+          const cardH = Number(card.css.height) || 80;
+          flowY = getSafePageBreakTop(flowY, cardH);
+          card.css.top = flowY;
+          const dot = dots[idx];
+          if (dot) dot.css.top = flowY + 6;
+          flowY += cardH + 12;
+        });
+        if (lineW) {
+          lineW.css.top = projLineStart;
+          lineW.css.height = Math.max(30, flowY - projLineStart - 10);
+        }
+        flowY += 8;
+      } else if (type === 'education' && eduSectionWidgets.length > 0) {
+        const titleW = eduSectionWidgets.find((w) => (w.title || '').includes('标题') || (w.id || '').includes('title'));
+        const contentW = eduSectionWidgets.find((w) => w !== titleW);
+        if (titleW) {
+          flowY = getSafeSectionTitleTop(flowY, Number(titleW.css.height) || 28, 40);
+          titleW.css.top = flowY;
+          flowY += (Number(titleW.css.height) || 28) + 6;
+        }
+        if (contentW) {
+          const eduH = Number(contentW.css.height) || 40;
+          flowY = getSafePageBreakTop(flowY, eduH);
+          contentW.css.top = flowY;
+          flowY += eduH + 18;
         }
       }
-    }
+    });
 
-    curr.css.top = currTop;
-
-    const currBottom = currTop + (Number(curr.css.height) || 30);
-    if (currBottom > maxCanvasBottom) {
-      maxCanvasBottom = currBottom;
-    }
+    const totalPages = Math.max(1, Math.ceil(flowY / A4_PAGE_HEIGHT));
+    finalCanvasBottom = totalPages * A4_PAGE_HEIGHT;
   }
 
-  // Dynamically expand background containers to fit all enclosed widgets
-  page.children.filter(isBackgroundWidget).forEach((bg) => {
-    const bgLeft = Number(bg.css.left) || 0;
-    const bgWidth = Number(bg.css.width) || 200;
-    let maxChildBottom = (Number(bg.css.top) || 0) + 100;
+  newSchema.css.height = finalCanvasBottom;
 
-    foregroundWidgets.forEach((w) => {
-      const wLeft = Number(w.css.left) || 0;
-      const wWidth = Number(w.css.width) || 50;
-      const wBottom = (Number(w.css.top) || 0) + (Number(w.css.height) || 30);
-
-      // If widget falls within the horizontal corridor of the background container
-      if (wLeft >= bgLeft - 10 && wLeft + wWidth <= bgLeft + bgWidth + 10) {
-        if (wBottom + 25 > maxChildBottom) {
-          maxChildBottom = wBottom + 25;
-        }
-      }
-    });
-
-    bg.css.height = Math.max(Number(bg.css.height) || 100, Math.ceil(maxChildBottom - (Number(bg.css.top) || 0)));
-  });
-
-  newSchema.css.height = Math.max(1160, Math.ceil(maxCanvasBottom + 50));
-
-  return newSchema;
+  return reflowCanvasWidgetsForPagination(newSchema);
 }
 
 export function buildLegoSchemaFromResume(
@@ -827,6 +1599,7 @@ export function buildLegoSchemaFromResume(
     let rightTop = 30;
 
     // Education Header & Card
+    rightTop = getSafeSectionTitleTop(rightTop, 30, 45);
     children.push({
       id: 'widget-edu-title-main',
       componentName: 'hj-text-1',
@@ -863,6 +1636,8 @@ export function buildLegoSchemaFromResume(
     rightTop += 85;
 
     // Work Experience Header & Cards
+    const firstWorkH = workList.length > 0 ? calculateCardHeight(workList[0].company, workList[0].role, workList[0].period, workList[0].bullets, 500, 12.5, 20) : 100;
+    rightTop = getSafeSectionTitleTop(rightTop, 30, firstWorkH + 10);
     children.push({
       id: 'widget-work-title-main',
       componentName: 'hj-text-1',
@@ -885,6 +1660,7 @@ export function buildLegoSchemaFromResume(
     workList.forEach((w, idx) => {
       const formattedBullets = w.bullets.map((b) => (b.trim().startsWith('•') ? b : `• ${b}`)).join('\n');
       const cardHeight = calculateCardHeight(w.company, w.role, w.period, w.bullets, 500, 12.5, 20);
+      rightTop = getSafePageBreakTop(rightTop, cardHeight);
       children.push({
         id: `widget-work-card-${idx}`,
         componentName: 'hj-[#exper-1]',
@@ -912,9 +1688,11 @@ export function buildLegoSchemaFromResume(
       rightTop += cardHeight + 14;
     });
 
-    rightTop += 10;
+    rightTop += 6;
 
     // Project Experience Header & Cards
+    const firstProjH = projectList.length > 0 ? calculateCardHeight(projectList[0].name, projectList[0].role, projectList[0].period, projectList[0].bullets, 500, 12.5, 20) : 100;
+    rightTop = getSafeSectionTitleTop(rightTop, 30, firstProjH + 10);
     children.push({
       id: 'widget-project-title-main',
       componentName: 'hj-text-1',
@@ -937,6 +1715,7 @@ export function buildLegoSchemaFromResume(
     projectList.forEach((p, idx) => {
       const formattedBullets = p.bullets.map((b) => (b.trim().startsWith('•') ? b : `• ${b}`)).join('\n');
       const cardHeight = calculateCardHeight(p.name, p.role, p.period, p.bullets, 500, 12.5, 20);
+      rightTop = getSafePageBreakTop(rightTop, cardHeight);
       children.push({
         id: `widget-project-card-${idx}`,
         componentName: 'hj-[#exper-1]',
@@ -964,9 +1743,10 @@ export function buildLegoSchemaFromResume(
       rightTop += cardHeight + 14;
     });
 
-    rightTop += 10;
+    rightTop += 6;
 
     // Skills
+    rightTop = getSafeSectionTitleTop(rightTop, 30, 60);
     children.push({
       id: 'widget-skills-title-main',
       componentName: 'hj-text-1',
@@ -984,13 +1764,15 @@ export function buildLegoSchemaFromResume(
       dataSource: { text: '| 核心能力与技能工具' }
     });
 
+    rightTop += 34;
+    rightTop = getSafePageBreakTop(rightTop, 70);
     children.push({
       id: 'widget-skills-content-main',
       componentName: 'hj-text-1',
       title: '技能工具清单',
       css: {
         left: 290,
-        top: rightTop + 34,
+        top: rightTop,
         width: 500,
         height: 70,
         zIndex: 2,
@@ -1001,20 +1783,24 @@ export function buildLegoSchemaFromResume(
       dataSource: { text: skills.join('  ·  ') }
     });
 
-    currentTop = Math.max(1120, rightTop + 100);
+    rightTop += 84;
+
+    const totalPages = Math.max(1, Math.ceil(rightTop / A4_PAGE_HEIGHT));
+    currentTop = totalPages * A4_PAGE_HEIGHT;
 
     const sidebarBg = children.find((c) => c.id === 'widget-sidebar-bg');
     if (sidebarBg) {
-      sidebarBg.css.height = Math.max(1100, currentTop - 40);
+      sidebarBg.css.height = currentTop - 40;
     }
 
-    return {
+    const schemaResult: IHJSchema = {
       id: `lego-resume-sidebar-${Date.now()}`,
       version: '1.0.0',
       componentsTree: [{ id: 'page-1', componentName: 'page', commentType: 'page', children }],
       css: { width: 820, height: currentTop, background: '#ffffff', opacity: 1, fontFamily: 'Inter, sans-serif', themeColor },
       config: { title: `${name} 的【1.3 双栏侧边栏】积木简历` }
     };
+    return reflowCanvasWidgetsForPagination(schemaResult);
   }
 
   // -------------------------------------------------------------
@@ -1092,7 +1878,7 @@ export function buildLegoSchemaFromResume(
         width: bannerTextWidth,
         height: 60,
         zIndex: 2,
-        fontColor: '#bfdbfe',
+        fontColor: '#f1f5f9',
         fontSize: 13,
         lineHeight: 1.6
       },
@@ -1102,6 +1888,8 @@ export function buildLegoSchemaFromResume(
     let topPos = 190;
 
     // 1. Summary
+    const sumH = calculateSummaryHeight(summary, 760, 13, 21);
+    topPos = getSafeSectionTitleTop(topPos, 30, Math.min(sumH, 80));
     children.push({
       id: 'widget-corp-summary-title',
       componentName: 'hj-text-1',
@@ -1111,7 +1899,6 @@ export function buildLegoSchemaFromResume(
     });
     topPos += 32;
 
-    const sumH = calculateSummaryHeight(summary, 760, 13, 21);
     children.push({
       id: 'widget-corp-summary-content',
       componentName: 'hj-text-1',
@@ -1122,6 +1909,7 @@ export function buildLegoSchemaFromResume(
     topPos += sumH + 20;
 
     // 2. Core Skills
+    topPos = getSafeSectionTitleTop(topPos, 30, 40);
     children.push({
       id: 'widget-corp-skills-title',
       componentName: 'hj-text-1',
@@ -1132,13 +1920,14 @@ export function buildLegoSchemaFromResume(
     topPos += 34;
 
     let skillX = 30;
+    topPos = getSafePageBreakTop(topPos, 26);
     let skillY = topPos;
     skills.forEach((sk, sIdx) => {
-      const maxAllowedTagW = 720;
-      const tagW = Math.min(maxAllowedTagW, Math.max(75, Math.ceil(sk.length * 9.5 + 20)));
+      const tagW = calculateTagWidth(sk, 11.5);
       if (skillX > 30 && skillX + tagW > 770) {
         skillX = 30;
-        skillY += 32;
+        skillY += 34;
+        skillY = getSafePageBreakTop(skillY, 26);
       }
       children.push({
         id: `widget-corp-skill-${sIdx}`,
@@ -1167,6 +1956,8 @@ export function buildLegoSchemaFromResume(
     topPos = skillY + 42;
 
     // 3. Work Experience
+    const firstWorkH = workList.length > 0 ? calculateCardHeight(workList[0].company, workList[0].role, workList[0].period, workList[0].bullets, 760, 12.5, 20) : 100;
+    topPos = getSafeSectionTitleTop(topPos, 30, firstWorkH + 10);
     children.push({
       id: 'widget-corp-work-title',
       componentName: 'hj-text-1',
@@ -1179,6 +1970,7 @@ export function buildLegoSchemaFromResume(
     workList.forEach((w, idx) => {
       const formattedBullets = w.bullets.map((b) => (b.trim().startsWith('•') ? b : `• ${b}`)).join('\n');
       const cardHeight = calculateCardHeight(w.company, w.role, w.period, w.bullets, 760, 12.5, 20);
+      topPos = getSafePageBreakTop(topPos, cardHeight);
       children.push({
         id: `widget-corp-work-${idx}`,
         componentName: 'hj-[#exper-1]',
@@ -1205,9 +1997,11 @@ export function buildLegoSchemaFromResume(
       });
       topPos += cardHeight + 14;
     });
-    topPos += 10;
+    topPos += 6;
 
     // 4. Project Experience
+    const firstProjH = projectList.length > 0 ? calculateCardHeight(projectList[0].name, projectList[0].role, projectList[0].period, projectList[0].bullets, 760, 12.5, 20) : 100;
+    topPos = getSafeSectionTitleTop(topPos, 30, firstProjH + 10);
     children.push({
       id: 'widget-corp-proj-title',
       componentName: 'hj-text-1',
@@ -1220,6 +2014,7 @@ export function buildLegoSchemaFromResume(
     projectList.forEach((p, idx) => {
       const formattedBullets = p.bullets.map((b) => (b.trim().startsWith('•') ? b : `• ${b}`)).join('\n');
       const cardHeight = calculateCardHeight(p.name, p.role, p.period, p.bullets, 760, 12.5, 20);
+      topPos = getSafePageBreakTop(topPos, cardHeight);
       children.push({
         id: `widget-corp-proj-${idx}`,
         componentName: 'hj-[#exper-1]',
@@ -1246,9 +2041,10 @@ export function buildLegoSchemaFromResume(
       });
       topPos += cardHeight + 14;
     });
-    topPos += 10;
+    topPos += 6;
 
     // 5. Education
+    topPos = getSafeSectionTitleTop(topPos, 30, 40);
     children.push({
       id: 'widget-corp-edu-title',
       componentName: 'hj-text-1',
@@ -1258,6 +2054,7 @@ export function buildLegoSchemaFromResume(
     });
     topPos += 34;
 
+    topPos = getSafePageBreakTop(topPos, 30);
     children.push({
       id: 'widget-corp-edu-content',
       componentName: 'hj-text-1',
@@ -1267,13 +2064,16 @@ export function buildLegoSchemaFromResume(
     });
     topPos += 45;
 
-    return {
+    const totalPages = Math.max(1, Math.ceil(topPos / A4_PAGE_HEIGHT));
+    const finalHeight = totalPages * A4_PAGE_HEIGHT;
+
+    const schemaResult: IHJSchema = {
       id: `lego-resume-corporate-${Date.now()}`,
       version: '1.0.0',
       componentsTree: [{ id: 'page-1', componentName: 'page', commentType: 'page', children }],
       css: {
         width: 820,
-        height: Math.max(1160, topPos + 40),
+        height: finalHeight,
         background: '#ffffff',
         opacity: 1,
         fontFamily: 'Inter, sans-serif',
@@ -1283,6 +2083,7 @@ export function buildLegoSchemaFromResume(
         title: `${name} 的【商务 Header 沉稳范】积木简历`
       }
     };
+    return reflowCanvasWidgetsForPagination(schemaResult);
   }
 
   // -------------------------------------------------------------
@@ -1348,7 +2149,8 @@ export function buildLegoSchemaFromResume(
     topPos += 18;
 
     // Helper for Section Titles
-    const addTimelineSectionTitle = (titleText: string, idPrefix: string) => {
+    const addTimelineSectionTitle = (titleText: string, idPrefix: string, minFollowH: number = 70) => {
+      topPos = getSafeSectionTitleTop(topPos, 24, minFollowH);
       children.push({
         id: `widget-tl-sec-title-${idPrefix}`,
         componentName: 'hj-text-1',
@@ -1370,8 +2172,8 @@ export function buildLegoSchemaFromResume(
     };
 
     // 1. Summary
-    addTimelineSectionTitle('// 01. 职业摘要', 'summary');
     const sumH = calculateSummaryHeight(summary, 760, 12.5, 20);
+    addTimelineSectionTitle('// 01. 职业摘要', 'summary', Math.min(sumH, 70));
     children.push({
       id: 'widget-summary-tl-content',
       componentName: 'hj-text-1',
@@ -1392,14 +2194,16 @@ export function buildLegoSchemaFromResume(
     topPos += sumH + 18;
 
     // 2. Core Skills
-    addTimelineSectionTitle('// 02. 核心能力与技能工具', 'coreskills');
+    addTimelineSectionTitle('// 02. 核心能力与技能工具', 'coreskills', 40);
     let skillX = 30;
+    topPos = getSafePageBreakTop(topPos, 26);
     let skillY = topPos;
     skills.forEach((sk, sIdx) => {
-      const tagW = Math.max(65, Math.min(360, sk.length * 10 + 20));
+      const tagW = calculateTagWidth(sk, 11.5);
       if (skillX + tagW > 780) {
         skillX = 30;
-        skillY += 30;
+        skillY += 32;
+        skillY = getSafePageBreakTop(skillY, 26);
       }
       children.push({
         id: `widget-skill-tl-${sIdx}`,
@@ -1409,7 +2213,7 @@ export function buildLegoSchemaFromResume(
           left: skillX,
           top: skillY,
           width: tagW,
-          height: 24,
+          height: 26,
           zIndex: 2,
           backgroundColor: '#f1f5f9',
           borderColor: '#cbd5e1',
@@ -1424,16 +2228,18 @@ export function buildLegoSchemaFromResume(
       });
       skillX += tagW + 8;
     });
-    topPos = skillY + 38;
+    topPos = skillY + 40;
 
     // 3. Work Experience (With Timeline Line & Dots)
-    addTimelineSectionTitle('// 03. 工作经历', 'work');
+    const firstWorkH = workList.length > 0 ? calculateCardHeight(workList[0].company, workList[0].role, workList[0].period, workList[0].bullets, 722, 12.5, 20) : 100;
+    addTimelineSectionTitle('// 03. 工作经历', 'work', firstWorkH + 10);
     const workLineTop = topPos + 4;
     let workCurrentY = topPos;
 
     workList.forEach((w, idx) => {
       const formattedBullets = w.bullets.map((b) => (b.trim().startsWith('•') ? b : `• ${b}`)).join('\n');
       const cardHeight = calculateCardHeight(w.company, w.role, w.period, w.bullets, 722, 12.5, 20);
+      workCurrentY = getSafePageBreakTop(workCurrentY, cardHeight);
 
       // Circle Node Dot
       children.push({
@@ -1499,13 +2305,15 @@ export function buildLegoSchemaFromResume(
     topPos = workCurrentY + 10;
 
     // 4. Project Experience (With Timeline Line & Dots)
-    addTimelineSectionTitle('// 04. 项目经历', 'project');
+    const firstProjH = projectList.length > 0 ? calculateCardHeight(projectList[0].name, projectList[0].role, projectList[0].period, projectList[0].bullets, 722, 12.5, 20) : 100;
+    addTimelineSectionTitle('// 04. 项目经历', 'project', firstProjH + 10);
     const projLineTop = topPos + 4;
     let projCurrentY = topPos;
 
     projectList.forEach((p, idx) => {
       const formattedBullets = p.bullets.map((b) => (b.trim().startsWith('•') ? b : `• ${b}`)).join('\n');
       const cardHeight = calculateCardHeight(p.name, p.role, p.period, p.bullets, 722, 12.5, 20);
+      projCurrentY = getSafePageBreakTop(projCurrentY, cardHeight);
 
       // Circle Node Dot
       children.push({
@@ -1571,7 +2379,8 @@ export function buildLegoSchemaFromResume(
     topPos = projCurrentY + 10;
 
     // 5. Education
-    addTimelineSectionTitle('// 05. 教育背景', 'education');
+    addTimelineSectionTitle('// 05. 教育背景', 'education', 40);
+    topPos = getSafePageBreakTop(topPos, 30);
     children.push({
       id: 'widget-edu-tl-content',
       componentName: 'hj-text-1',
@@ -1590,13 +2399,16 @@ export function buildLegoSchemaFromResume(
     });
     topPos += 45;
 
-    return {
+    const totalPages = Math.max(1, Math.ceil(topPos / A4_PAGE_HEIGHT));
+    const finalHeight = totalPages * A4_PAGE_HEIGHT;
+
+    const schemaResult: IHJSchema = {
       id: `lego-resume-timeline-${Date.now()}`,
       version: '1.0.0',
       componentsTree: [{ id: 'page-1', componentName: 'page', commentType: 'page', children }],
       css: {
         width: 820,
-        height: Math.max(1160, topPos + 40),
+        height: finalHeight,
         background: '#ffffff',
         opacity: 1,
         fontFamily: 'Inter, sans-serif',
@@ -1606,12 +2418,16 @@ export function buildLegoSchemaFromResume(
         title: `${name} 的【时间轴极客型】积木简历`
       }
     };
+    return reflowCanvasWidgetsForPagination(schemaResult);
   }
 
   // -------------------------------------------------------------
-  // LAYOUT 4: Grid Cards (微阴影卡片流)
+  // -------------------------------------------------------------
+  // LAYOUT 4: Grid Cards (微阴影卡片流 / 现代卡片风格)
   // -------------------------------------------------------------
   if (effectiveTemplateId === 'grid-cards') {
+    let cardTop = 25;
+
     // Header Card
     children.push({
       id: 'widget-grid-header-bg',
@@ -1619,12 +2435,12 @@ export function buildLegoSchemaFromResume(
       title: '顶部卡片',
       css: {
         left: 25,
-        top: 25,
+        top: cardTop,
         width: 770,
-        height: 120,
+        height: 125,
         zIndex: 1,
-        backgroundColor: '#f0fdf4',
-        borderColor: '#bbf7d0',
+        backgroundColor: '#f8fafc',
+        borderColor: '#e2e8f0',
         borderStyle: 'solid',
         borderWidth: 1,
         borderRadius: 10
@@ -1639,7 +2455,7 @@ export function buildLegoSchemaFromResume(
         title: '个人头像照片',
         css: {
           left: 670,
-          top: 35,
+          top: cardTop + 16,
           width: avatarWidth,
           height: avatarHeight,
           zIndex: 2,
@@ -1649,14 +2465,16 @@ export function buildLegoSchemaFromResume(
       });
     }
 
+    const gridHeaderWidth = hasAvatar ? 600 : 720;
+
     children.push({
       id: 'widget-grid-name',
       componentName: 'hj-text-1',
       title: '姓名',
       css: {
         left: 45,
-        top: 40,
-        width: 600,
+        top: cardTop + 18,
+        width: gridHeaderWidth,
         height: 36,
         zIndex: 2,
         fontColor: themeColor,
@@ -1669,20 +2487,424 @@ export function buildLegoSchemaFromResume(
     children.push({
       id: 'widget-grid-contact',
       componentName: 'hj-text-1',
-      title: '联系方式',
+      title: '联系方式与求职意向',
       css: {
         left: 45,
-        top: 80,
-        width: 600,
-        height: 40,
+        top: cardTop + 60,
+        width: gridHeaderWidth,
+        height: 48,
         zIndex: 2,
-        fontColor: '#047857',
-        fontSize: 12.5
+        fontColor: '#475569',
+        fontSize: 12.5,
+        lineHeight: 1.6
       },
-      dataSource: { text: `${email}  |  ${phone}  |  ${location}  |  意向：${jobIntent}` }
+      dataSource: { text: `🎯 求职意向：${jobIntent}\n📫 邮箱：${email}  |  📱 电话：${phone}  |  📍 城市：${location}` }
     });
 
-    currentTop = 160;
+    cardTop += 140;
+
+    // Summary Card
+    const sumH = calculateSummaryHeight(summary, 730, 13, 21);
+    const sumCardH = sumH + 50;
+    cardTop = getSafePageBreakTop(cardTop, sumCardH);
+    children.push({
+      id: 'widget-grid-summary-bg',
+      componentName: 'hj-rectangle',
+      title: '个人总结卡片',
+      css: {
+        left: 25,
+        top: cardTop,
+        width: 770,
+        height: sumCardH,
+        zIndex: 1,
+        backgroundColor: '#ffffff',
+        borderColor: '#e2e8f0',
+        borderStyle: 'solid',
+        borderWidth: 1,
+        borderRadius: 8
+      },
+      dataSource: {}
+    });
+
+    children.push({
+      id: 'widget-grid-summary-title',
+      componentName: 'hj-text-1',
+      title: '职业总结标题',
+      css: {
+        left: 45,
+        top: cardTop + 14,
+        width: 730,
+        height: 24,
+        zIndex: 2,
+        fontColor: themeColor,
+        fontSize: 15,
+        fontWeight: 'bold'
+      },
+      dataSource: { text: '💡 职业优势与个人总结' }
+    });
+
+    children.push({
+      id: 'widget-grid-summary-content',
+      componentName: 'hj-text-1',
+      title: '职业总结内容',
+      css: {
+        left: 45,
+        top: cardTop + 42,
+        width: 730,
+        height: sumH,
+        zIndex: 2,
+        fontColor: '#334155',
+        fontSize: 13,
+        lineHeight: 1.6
+      },
+      dataSource: { text: summary }
+    });
+
+    cardTop += sumCardH + 15;
+
+    // Skills Card
+    let skillRowX = 45;
+    let skillRowY = cardTop + 46;
+    const skillPills: IWidget[] = [];
+    skills.forEach((sk, sIdx) => {
+      const tagW = calculateTagWidth(sk, 11.5);
+      if (skillRowX > 45 && skillRowX + tagW > 765) {
+        skillRowX = 45;
+        skillRowY += 34;
+      }
+      skillPills.push({
+        id: `widget-grid-skill-${sIdx}`,
+        componentName: 'hj-rectangle',
+        title: `技能标签 ${sIdx + 1}`,
+        css: {
+          left: skillRowX,
+          top: skillRowY,
+          width: tagW,
+          height: 26,
+          zIndex: 2,
+          backgroundColor: '#eff6ff',
+          borderColor: '#bfdbfe',
+          borderWidth: 1,
+          borderStyle: 'solid',
+          borderRadius: 13,
+          fontColor: themeColor,
+          fontSize: 11.5,
+          fontWeight: '500',
+          textAlign: 'center'
+        },
+        dataSource: { text: sk }
+      });
+      skillRowX += tagW + 8;
+    });
+
+    const skillsCardHeight = (skillRowY - cardTop) + 38;
+    cardTop = getSafePageBreakTop(cardTop, skillsCardHeight);
+
+    // Adjust skill pills top based on safe cardTop
+    const skillTopOffset = cardTop + 46 - (skillPills[0] ? Number(skillPills[0].css.top) : cardTop + 46);
+    if (skillTopOffset !== 0) {
+      skillPills.forEach((p) => {
+        p.css.top = (Number(p.css.top) || 0) + skillTopOffset;
+      });
+    }
+
+    children.push({
+      id: 'widget-grid-skills-bg',
+      componentName: 'hj-rectangle',
+      title: '核心技能卡片背景',
+      css: {
+        left: 25,
+        top: cardTop,
+        width: 770,
+        height: skillsCardHeight,
+        zIndex: 1,
+        backgroundColor: '#ffffff',
+        borderColor: '#e2e8f0',
+        borderStyle: 'solid',
+        borderWidth: 1,
+        borderRadius: 8
+      },
+      dataSource: {}
+    });
+
+    children.push({
+      id: 'widget-grid-skills-title',
+      componentName: 'hj-text-1',
+      title: '核心技能标题',
+      css: {
+        left: 45,
+        top: cardTop + 14,
+        width: 730,
+        height: 24,
+        zIndex: 2,
+        fontColor: themeColor,
+        fontSize: 15,
+        fontWeight: 'bold'
+      },
+      dataSource: { text: '⚡ 核心专业技能' }
+    });
+
+    children.push(...skillPills);
+    cardTop += skillsCardHeight + 18;
+
+    // Work Experience
+    const firstWorkH = workList.length > 0 ? calculateCardHeight(workList[0].company, workList[0].role, workList[0].period, workList[0].bullets, 770, 12.5, 20) : 100;
+    cardTop = getSafeSectionTitleTop(cardTop, 26, firstWorkH + 10);
+    children.push({
+      id: 'widget-grid-work-sec-title',
+      componentName: 'hj-text-1',
+      title: '工作经历板块标题',
+      css: {
+        left: 25,
+        top: cardTop,
+        width: 770,
+        height: 26,
+        zIndex: 2,
+        fontColor: themeColor,
+        fontSize: 16,
+        fontWeight: 'bold'
+      },
+      dataSource: { text: '💼 工作经历' }
+    });
+    cardTop += 32;
+
+    workList.forEach((w, wIdx) => {
+      const formattedBullets = w.bullets.map((b) => `• ${b}`).join('\n');
+      const cardH = calculateCardHeight(w.company, w.role, w.period, w.bullets, 770, 12.5, 20);
+      cardTop = getSafePageBreakTop(cardTop, cardH);
+
+      children.push({
+        id: `widget-grid-work-bg-${wIdx}`,
+        componentName: 'hj-rectangle',
+        title: `工作卡片背景 ${wIdx + 1}`,
+        css: {
+          left: 25,
+          top: cardTop,
+          width: 770,
+          height: cardH,
+          zIndex: 1,
+          backgroundColor: '#ffffff',
+          borderColor: '#e2e8f0',
+          borderStyle: 'solid',
+          borderWidth: 1,
+          borderRadius: 8
+        },
+        dataSource: {}
+      });
+
+      children.push({
+        id: `widget-grid-work-header-${wIdx}`,
+        componentName: 'hj-text-1',
+        title: `工作信息头部 ${wIdx + 1}`,
+        css: {
+          left: 45,
+          top: cardTop + 12,
+          width: 730,
+          height: 24,
+          zIndex: 2,
+          fontColor: '#0f172a',
+          fontSize: 14,
+          fontWeight: 'bold'
+        },
+        dataSource: { text: `${w.company}  ·  ${w.role}  (${w.period})` }
+      });
+
+      children.push({
+        id: `widget-grid-work-content-${wIdx}`,
+        componentName: 'hj-text-1',
+        title: `工作要点内容 ${wIdx + 1}`,
+        css: {
+          left: 45,
+          top: cardTop + 40,
+          width: 730,
+          height: Math.max(30, cardH - 52),
+          zIndex: 2,
+          fontColor: '#334155',
+          fontSize: 12.5,
+          lineHeight: 1.6
+        },
+        dataSource: {
+          companyName: w.company,
+          jobTitle: w.role,
+          workTime: w.period,
+          workContent: formattedBullets,
+          text: formattedBullets
+        }
+      });
+
+      cardTop += cardH + 12;
+    });
+
+    cardTop += 6;
+
+    // Project Experience
+    if (projectList.length > 0) {
+      const firstProjH = projectList.length > 0 ? calculateCardHeight(projectList[0].name, projectList[0].role, projectList[0].period, projectList[0].bullets, 770, 12.5, 20) : 100;
+      cardTop = getSafeSectionTitleTop(cardTop, 26, firstProjH + 10);
+      children.push({
+        id: 'widget-grid-proj-sec-title',
+        componentName: 'hj-text-1',
+        title: '项目经历板块标题',
+        css: {
+          left: 25,
+          top: cardTop,
+          width: 770,
+          height: 26,
+          zIndex: 2,
+          fontColor: themeColor,
+          fontSize: 16,
+          fontWeight: 'bold'
+        },
+        dataSource: { text: '🚀 重点项目经历' }
+      });
+      cardTop += 32;
+
+      projectList.forEach((p, pIdx) => {
+        const formattedBullets = p.bullets.map((b) => `• ${b}`).join('\n');
+        const cardH = calculateCardHeight(p.name, p.role, p.period, p.bullets, 770, 12.5, 20);
+        cardTop = getSafePageBreakTop(cardTop, cardH);
+
+        children.push({
+          id: `widget-grid-proj-bg-${pIdx}`,
+          componentName: 'hj-rectangle',
+          title: `项目卡片背景 ${pIdx + 1}`,
+          css: {
+            left: 25,
+            top: cardTop,
+            width: 770,
+            height: cardH,
+            zIndex: 1,
+            backgroundColor: '#ffffff',
+            borderColor: '#e2e8f0',
+            borderStyle: 'solid',
+            borderWidth: 1,
+            borderRadius: 8
+          },
+          dataSource: {}
+        });
+
+        children.push({
+          id: `widget-grid-proj-header-${pIdx}`,
+          componentName: 'hj-text-1',
+          title: `项目信息头部 ${pIdx + 1}`,
+          css: {
+            left: 45,
+            top: cardTop + 12,
+            width: 730,
+            height: 24,
+            zIndex: 2,
+            fontColor: '#0f172a',
+            fontSize: 14,
+            fontWeight: 'bold'
+          },
+          dataSource: { text: `${p.name}  ·  ${p.role}  (${p.period})` }
+        });
+
+        children.push({
+          id: `widget-grid-proj-content-${pIdx}`,
+          componentName: 'hj-text-1',
+          title: `项目要点内容 ${pIdx + 1}`,
+          css: {
+            left: 45,
+            top: cardTop + 40,
+            width: 730,
+            height: Math.max(30, cardH - 52),
+            zIndex: 2,
+            fontColor: '#334155',
+            fontSize: 12.5,
+            lineHeight: 1.6
+          },
+          dataSource: {
+            companyName: p.name,
+            jobTitle: p.role,
+            workTime: p.period,
+            workContent: formattedBullets,
+            text: formattedBullets
+          }
+        });
+
+        cardTop += cardH + 12;
+      });
+      cardTop += 6;
+    }
+
+    // Education Card
+    const eduCardH = 74;
+    cardTop = getSafePageBreakTop(cardTop, eduCardH);
+    children.push({
+      id: 'widget-grid-edu-bg',
+      componentName: 'hj-rectangle',
+      title: '教育背景卡片',
+      css: {
+        left: 25,
+        top: cardTop,
+        width: 770,
+        height: eduCardH,
+        zIndex: 1,
+        backgroundColor: '#ffffff',
+        borderColor: '#e2e8f0',
+        borderStyle: 'solid',
+        borderWidth: 1,
+        borderRadius: 8
+      },
+      dataSource: {}
+    });
+
+    children.push({
+      id: 'widget-grid-edu-title',
+      componentName: 'hj-text-1',
+      title: '教育背景标题',
+      css: {
+        left: 45,
+        top: cardTop + 12,
+        width: 730,
+        height: 22,
+        zIndex: 2,
+        fontColor: themeColor,
+        fontSize: 14,
+        fontWeight: 'bold'
+      },
+      dataSource: { text: '🎓 教育背景' }
+    });
+
+    children.push({
+      id: 'widget-grid-edu-content',
+      componentName: 'hj-text-1',
+      title: '教育背景内容',
+      css: {
+        left: 45,
+        top: cardTop + 38,
+        width: 730,
+        height: 26,
+        zIndex: 2,
+        fontColor: '#334155',
+        fontSize: 13
+      },
+      dataSource: { text: `${edu.school}  ·  ${edu.degree}  (${edu.period})` }
+    });
+
+    cardTop += eduCardH + 30;
+
+    const totalPages = Math.max(1, Math.ceil(cardTop / A4_PAGE_HEIGHT));
+    const finalHeight = totalPages * A4_PAGE_HEIGHT;
+
+    const schemaResult: IHJSchema = {
+      id: `lego-resume-grid-cards-${Date.now()}`,
+      version: '1.0.0',
+      componentsTree: [{ id: 'page-1', componentName: 'page', commentType: 'page', children }],
+      css: {
+        width: 820,
+        height: finalHeight,
+        background: '#f8fafc',
+        opacity: 1,
+        fontFamily: 'Inter, sans-serif',
+        themeColor
+      },
+      config: {
+        title: `${name} 的【微阴影卡片流】积木简历`
+      }
+    };
+    return reflowCanvasWidgetsForPagination(schemaResult);
   }
 
   // -------------------------------------------------------------
@@ -1749,7 +2971,8 @@ export function buildLegoSchemaFromResume(
     topPos += 18;
 
     // Helper for Section Header in Minimal Style
-    const addMinimalSectionTitle = (titleText: string, idPrefix: string) => {
+    const addMinimalSectionTitle = (titleText: string, idPrefix: string, minFollowH: number = 70) => {
+      topPos = getSafeSectionTitleTop(topPos, 32, minFollowH);
       children.push({
         id: `widget-sec-title-${idPrefix}`,
         componentName: 'hj-text-8',
@@ -1774,8 +2997,8 @@ export function buildLegoSchemaFromResume(
     };
 
     // 1. Profile / Summary
-    addMinimalSectionTitle('个人优势 & 核心能力 PROFILE', 'profile');
     const summaryH = calculateSummaryHeight(summary, 740, 13, 20);
+    addMinimalSectionTitle('个人优势 & 核心能力 PROFILE', 'profile', Math.min(summaryH, 70));
     children.push({
       id: 'widget-summary-minimal-content',
       componentName: 'hj-text-6',
@@ -1795,10 +3018,12 @@ export function buildLegoSchemaFromResume(
     topPos += summaryH + 20;
 
     // 2. Work Experience
-    addMinimalSectionTitle('工作经历 WORK EXPERIENCE', 'work');
+    const firstWorkH = workList.length > 0 ? calculateCardHeight(workList[0].company, workList[0].role, workList[0].period, workList[0].bullets, 740, 13, 20) : 100;
+    addMinimalSectionTitle('工作经历 WORK EXPERIENCE', 'work', firstWorkH + 10);
     workList.forEach((w, idx) => {
       const formattedBullets = w.bullets.map((b) => (b.trim().startsWith('•') || b.trim().startsWith('1.') || b.trim().startsWith('2.')) ? b : `• ${b}`).join('\n');
       const cardHeight = calculateCardHeight(w.company, w.role, w.period, w.bullets, 740, 13, 20);
+      topPos = getSafePageBreakTop(topPos, cardHeight);
       children.push({
         id: `widget-work-minimal-${idx}`,
         componentName: 'hj-[#exper-1]',
@@ -1826,10 +3051,12 @@ export function buildLegoSchemaFromResume(
     topPos += 8;
 
     // 3. Project Experience
-    addMinimalSectionTitle('项目经验 PROJECT EXPERIENCE', 'project');
+    const firstProjH = projectList.length > 0 ? calculateCardHeight(projectList[0].name, projectList[0].role, projectList[0].period, projectList[0].bullets, 740, 13, 20) : 100;
+    addMinimalSectionTitle('项目经验 PROJECT EXPERIENCE', 'project', firstProjH + 10);
     projectList.forEach((p, idx) => {
       const formattedBullets = p.bullets.map((b) => (b.trim().startsWith('•') || b.trim().startsWith('1.') || b.trim().startsWith('2.')) ? b : `• ${b}`).join('\n');
       const cardHeight = calculateCardHeight(p.name, p.role, p.period, p.bullets, 740, 13, 20);
+      topPos = getSafePageBreakTop(topPos, cardHeight);
       children.push({
         id: `widget-project-minimal-${idx}`,
         componentName: 'hj-[#exper-1]',
@@ -1857,7 +3084,8 @@ export function buildLegoSchemaFromResume(
     topPos += 8;
 
     // 4. Education
-    addMinimalSectionTitle('教育背景 EDUCATION', 'education');
+    addMinimalSectionTitle('教育背景 EDUCATION', 'education', 40);
+    topPos = getSafePageBreakTop(topPos, 60);
     children.push({
       id: 'widget-edu-minimal-content',
       componentName: 'hj-[#exper-1]',
@@ -1881,7 +3109,8 @@ export function buildLegoSchemaFromResume(
     topPos += 75;
 
     // 5. Skills & Tools
-    addMinimalSectionTitle('技能软件 & 工具 SKILLS & TOOLS', 'skills');
+    addMinimalSectionTitle('技能软件 & 工具 SKILLS & TOOLS', 'skills', 40);
+    topPos = getSafePageBreakTop(topPos, 50);
     children.push({
       id: 'widget-skills-minimal-content',
       componentName: 'hj-text-6',
@@ -1900,13 +3129,16 @@ export function buildLegoSchemaFromResume(
     });
     topPos += 60;
 
-    return {
+    const totalPages = Math.max(1, Math.ceil(topPos / A4_PAGE_HEIGHT));
+    const finalHeight = totalPages * A4_PAGE_HEIGHT;
+
+    const schemaResult: IHJSchema = {
       id: `lego-resume-minimal-${Date.now()}`,
       version: '1.0.0',
       componentsTree: [{ id: 'page-1', componentName: 'page', commentType: 'page', children }],
       css: {
         width: 820,
-        height: Math.max(1160, topPos + 40),
+        height: finalHeight,
         background: '#ffffff',
         opacity: 1,
         fontFamily: 'Inter, sans-serif',
@@ -1916,6 +3148,7 @@ export function buildLegoSchemaFromResume(
         title: `${name} 的【简约清新风格】积木简历`
       }
     };
+    return reflowCanvasWidgetsForPagination(schemaResult);
   }
 
   // -------------------------------------------------------------
@@ -2021,7 +3254,8 @@ export function buildLegoSchemaFromResume(
     topPos += 16;
 
     // Helper for Section Titles in Classic Minimal
-    const addClassicSectionTitle = (titleText: string, idPrefix: string) => {
+    const addClassicSectionTitle = (titleText: string, idPrefix: string, minFollowH: number = 70) => {
+      topPos = getSafeSectionTitleTop(topPos, 24, minFollowH);
       children.push({
         id: `widget-sec-title-${idPrefix}`,
         componentName: 'hj-text-1',
@@ -2058,8 +3292,8 @@ export function buildLegoSchemaFromResume(
     };
 
     // 1. Summary
-    addClassicSectionTitle('职业摘要', 'summary');
     const sumH = calculateSummaryHeight(summary, 760, 12.5, 20);
+    addClassicSectionTitle('职业摘要', 'summary', Math.min(sumH, 70));
     children.push({
       id: 'widget-summary-classic-content',
       componentName: 'hj-text-1',
@@ -2080,14 +3314,16 @@ export function buildLegoSchemaFromResume(
     topPos += sumH + 18;
 
     // 2. Core Skills & Tools
-    addClassicSectionTitle('核心能力与专业技能', 'coreskills');
+    addClassicSectionTitle('核心能力与专业技能', 'coreskills', 40);
     let skillX = 30;
+    topPos = getSafePageBreakTop(topPos, 26);
     let skillY = topPos;
     skills.forEach((sk, sIdx) => {
-      const tagW = Math.max(65, Math.min(360, sk.length * 10 + 20));
+      const tagW = calculateTagWidth(sk, 11.5);
       if (skillX + tagW > 780) {
         skillX = 30;
-        skillY += 30;
+        skillY += 32;
+        skillY = getSafePageBreakTop(skillY, 26);
       }
       children.push({
         id: `widget-skill-pill-${sIdx}`,
@@ -2097,7 +3333,7 @@ export function buildLegoSchemaFromResume(
           left: skillX,
           top: skillY,
           width: tagW,
-          height: 24,
+          height: 26,
           zIndex: 2,
           backgroundColor: '#f1f5f9',
           borderColor: '#e2e8f0',
@@ -2112,13 +3348,15 @@ export function buildLegoSchemaFromResume(
       });
       skillX += tagW + 8;
     });
-    topPos = skillY + 38;
+    topPos = skillY + 40;
 
     // 3. Work Experience
-    addClassicSectionTitle('工作经历', 'work');
+    const firstWorkH = workList.length > 0 ? calculateCardHeight(workList[0].company, workList[0].role, workList[0].period, workList[0].bullets, 760, 12.5, 20) : 100;
+    addClassicSectionTitle('工作经历', 'work', firstWorkH + 10);
     workList.forEach((w, idx) => {
       const formattedBullets = w.bullets.map((b) => (b.trim().startsWith('•') ? b : `• ${b}`)).join('\n');
       const cardHeight = calculateCardHeight(w.company, w.role, w.period, w.bullets, 760, 12.5, 20);
+      topPos = getSafePageBreakTop(topPos, cardHeight);
       children.push({
         id: `widget-work-classic-${idx}`,
         componentName: 'hj-[#exper-1]',
@@ -2148,10 +3386,12 @@ export function buildLegoSchemaFromResume(
     topPos += 6;
 
     // 4. Project Experience
-    addClassicSectionTitle('项目经历', 'project');
+    const firstProjH = projectList.length > 0 ? calculateCardHeight(projectList[0].name, projectList[0].role, projectList[0].period, projectList[0].bullets, 760, 12.5, 20) : 100;
+    addClassicSectionTitle('项目经历', 'project', firstProjH + 10);
     projectList.forEach((p, idx) => {
       const formattedBullets = p.bullets.map((b) => (b.trim().startsWith('•') ? b : `• ${b}`)).join('\n');
       const cardHeight = calculateCardHeight(p.name, p.role, p.period, p.bullets, 760, 12.5, 20);
+      topPos = getSafePageBreakTop(topPos, cardHeight);
       children.push({
         id: `widget-project-classic-${idx}`,
         componentName: 'hj-[#exper-1]',
@@ -2181,7 +3421,8 @@ export function buildLegoSchemaFromResume(
     topPos += 6;
 
     // 5. Education
-    addClassicSectionTitle('教育背景', 'education');
+    addClassicSectionTitle('教育背景', 'education', 40);
+    topPos = getSafePageBreakTop(topPos, 30);
     children.push({
       id: 'widget-edu-classic-content',
       componentName: 'hj-text-1',
@@ -2200,13 +3441,16 @@ export function buildLegoSchemaFromResume(
     });
     topPos += 45;
 
-    return {
+    const totalPages = Math.max(1, Math.ceil(topPos / A4_PAGE_HEIGHT));
+    const finalHeight = totalPages * A4_PAGE_HEIGHT;
+
+    const schemaResult: IHJSchema = {
       id: `lego-resume-classic-${Date.now()}`,
       version: '1.0.0',
       componentsTree: [{ id: 'page-1', componentName: 'page', commentType: 'page', children }],
       css: {
         width: 820,
-        height: Math.max(1160, topPos + 40),
+        height: finalHeight,
         background: '#ffffff',
         opacity: 1,
         fontFamily: 'Inter, sans-serif',
@@ -2216,6 +3460,7 @@ export function buildLegoSchemaFromResume(
         title: `${name} 的【经典极简单栏】积木简历`
       }
     };
+    return reflowCanvasWidgetsForPagination(schemaResult);
   }
 
   // -------------------------------------------------------------
@@ -2341,6 +3586,7 @@ export function buildLegoSchemaFromResume(
   topPos += sumH + 18;
 
   // 2. Core Skills
+  topPos = getSafeSectionTitleTop(topPos, 30, 40);
   children.push({
     id: 'widget-skills-title',
     componentName: 'hj-text-1',
@@ -2351,13 +3597,14 @@ export function buildLegoSchemaFromResume(
   topPos += 34;
 
   let skillLeft = 30;
+  topPos = getSafePageBreakTop(topPos, 26);
   let skillTop = topPos;
   skills.forEach((sk, sIdx) => {
-    const maxAllowedTagW = 720;
-    const tagWidth = Math.min(maxAllowedTagW, Math.max(75, Math.ceil(sk.length * 9.5 + 20)));
+    const tagWidth = calculateTagWidth(sk, 11.5);
     if (skillLeft > 30 && skillLeft + tagWidth > 770) {
       skillLeft = 30;
-      skillTop += 32;
+      skillTop += 34;
+      skillTop = getSafePageBreakTop(skillTop, 26);
     }
     children.push({
       id: `widget-skill-tag-${sIdx}`,
@@ -2386,6 +3633,8 @@ export function buildLegoSchemaFromResume(
   topPos = skillTop + 42;
 
   // 3. Work Experience
+  const firstWorkH = workList.length > 0 ? calculateCardHeight(workList[0].company, workList[0].role, workList[0].period, workList[0].bullets, 760, 12.5, 20) : 100;
+  topPos = getSafeSectionTitleTop(topPos, 30, firstWorkH + 10);
   children.push({
     id: 'widget-work-title',
     componentName: 'hj-text-1',
@@ -2398,6 +3647,7 @@ export function buildLegoSchemaFromResume(
   workList.forEach((w, idx) => {
     const formattedBullets = w.bullets.map((b) => (b.trim().startsWith('•') ? b : `• ${b}`)).join('\n');
     const cardHeight = calculateCardHeight(w.company, w.role, w.period, w.bullets, 760, 12.5, 20);
+    topPos = getSafePageBreakTop(topPos, cardHeight);
     children.push({
       id: `widget-work-${idx}`,
       componentName: 'hj-[#exper-1]',
@@ -2425,9 +3675,11 @@ export function buildLegoSchemaFromResume(
     });
     topPos += cardHeight + 14;
   });
-  topPos += 10;
+  topPos += 6;
 
   // 4. Project Experience
+  const firstProjH = projectList.length > 0 ? calculateCardHeight(projectList[0].name, projectList[0].role, projectList[0].period, projectList[0].bullets, 760, 12.5, 20) : 100;
+  topPos = getSafeSectionTitleTop(topPos, 30, firstProjH + 10);
   children.push({
     id: 'widget-project-title',
     componentName: 'hj-text-1',
@@ -2440,6 +3692,7 @@ export function buildLegoSchemaFromResume(
   projectList.forEach((p, idx) => {
     const formattedBullets = p.bullets.map((b) => (b.trim().startsWith('•') ? b : `• ${b}`)).join('\n');
     const cardHeight = calculateCardHeight(p.name, p.role, p.period, p.bullets, 760, 12.5, 20);
+    topPos = getSafePageBreakTop(topPos, cardHeight);
     children.push({
       id: `widget-project-${idx}`,
       componentName: 'hj-[#exper-1]',
@@ -2467,9 +3720,10 @@ export function buildLegoSchemaFromResume(
     });
     topPos += cardHeight + 14;
   });
-  topPos += 10;
+  topPos += 6;
 
   // 5. Education
+  topPos = getSafeSectionTitleTop(topPos, 30, 40);
   children.push({
     id: 'widget-edu-title',
     componentName: 'hj-text-1',
@@ -2479,6 +3733,7 @@ export function buildLegoSchemaFromResume(
   });
   topPos += 34;
 
+  topPos = getSafePageBreakTop(topPos, 30);
   children.push({
     id: 'widget-edu-content',
     componentName: 'hj-text-1',
@@ -2488,13 +3743,16 @@ export function buildLegoSchemaFromResume(
   });
   topPos += 45;
 
-  return {
+  const totalPages = Math.max(1, Math.ceil(topPos / A4_PAGE_HEIGHT));
+  const finalHeight = totalPages * A4_PAGE_HEIGHT;
+
+  const schemaResult: IHJSchema = {
     id: `lego-resume-${templateId}-${Date.now()}`,
     version: '1.0.0',
     componentsTree: [{ id: 'page-1', componentName: 'page', commentType: 'page', children }],
     css: {
       width: 820,
-      height: Math.max(1160, topPos + 40),
+      height: finalHeight,
       background: '#ffffff',
       opacity: 1,
       fontFamily: 'Inter, sans-serif',
@@ -2504,4 +3762,5 @@ export function buildLegoSchemaFromResume(
       title: `${name} 的【${templateId}】积木简历`
     }
   };
+  return reflowCanvasWidgetsForPagination(schemaResult);
 }

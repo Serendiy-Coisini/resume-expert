@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { Toolbar } from './Toolbar';
 import { LeftComList } from './LeftComList';
 import { LegoCanvas } from './LegoCanvas';
@@ -10,13 +10,29 @@ import { Layout, PlusCircle, Settings } from 'lucide-react';
 
 export interface LegoDesignerProps {
   standalone?: boolean;
+  isFullScreen?: boolean;
+  onToggleFullScreen?: () => void;
 }
 
-export const LegoDesigner: React.FC<LegoDesignerProps> = ({ standalone }) => {
+export const LegoDesigner: React.FC<LegoDesignerProps> = ({
+  standalone,
+  isFullScreen: propIsFullScreen,
+  onToggleFullScreen: propOnToggleFullScreen,
+}) => {
   const { schema, setSchema, setScale } = useLegoDesignerStore();
   const { userInput, analysisResult, selectedTemplate, templateOptions, customTemplateHTML } = useResumeStore();
 
-  const [isFullScreen, setIsFullScreen] = useState(false);
+  const [internalFullScreen, setInternalFullScreen] = useState(false);
+  const isFullScreen = propIsFullScreen !== undefined ? propIsFullScreen : internalFullScreen;
+
+  const toggleFullScreen = useCallback(() => {
+    if (propOnToggleFullScreen) {
+      propOnToggleFullScreen();
+    } else {
+      setInternalFullScreen((prev) => !prev);
+    }
+  }, [propOnToggleFullScreen]);
+
   const [leftWidth, setLeftWidth] = useState(260);
   const [leftCollapsed, setLeftCollapsed] = useState(false);
   const [rightWidth, setRightWidth] = useState(260);
@@ -29,28 +45,37 @@ export const LegoDesigner: React.FC<LegoDesignerProps> = ({ standalone }) => {
   const [isResizingRight, setIsResizingRight] = useState(false);
 
   const containerRef = useRef<HTMLDivElement>(null);
+  const lastTemplateRef = useRef<string | null>(null);
+  const isInitializedRef = useRef(false);
 
+  // Initialize or re-template schema only when appropriate (first load, empty canvas, or explicit layout template change)
   useEffect(() => {
-    if (!standalone) {
-      // Auto populate Lego Canvas with AI-optimized resume data when template or analysisResult changes
-      const initialSchema = buildLegoSchemaFromResume(userInput, analysisResult, selectedTemplate, templateOptions, customTemplateHTML);
-      setSchema(initialSchema, false);
-    } else {
-      // In standalone mode, if canvas has no widgets, populate with default template built schema
-      const currentChildren = schema.componentsTree?.[0]?.children || [];
-      if (currentChildren.length === 0) {
-        const initialSchema = buildLegoSchemaFromResume(userInput, analysisResult, selectedTemplate, templateOptions, customTemplateHTML);
-        setSchema(initialSchema, false);
-      }
-    }
+    const currentChildren = schema.componentsTree?.[0]?.children || [];
+    const isTemplateChanged = lastTemplateRef.current !== null && lastTemplateRef.current !== selectedTemplate;
 
-    // Compute optimal fit scale on mount & window resize
+    if (!isInitializedRef.current || currentChildren.length === 0 || isTemplateChanged) {
+      const initialSchema = buildLegoSchemaFromResume(
+        userInput,
+        analysisResult,
+        selectedTemplate,
+        templateOptions,
+        customTemplateHTML
+      );
+      setSchema(initialSchema, false);
+      isInitializedRef.current = true;
+      lastTemplateRef.current = selectedTemplate;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedTemplate, setSchema]);
+
+  // Compute optimal fit scale on mount & window resize
+  useEffect(() => {
     const updateAutoFitScale = () => {
       if (containerRef.current) {
         const isMobile = window.innerWidth < 768;
         const availableHeight = containerRef.current.clientHeight - (isMobile ? 120 : 80);
         const availableWidth = containerRef.current.clientWidth - (isMobile ? 24 : 40);
-        
+
         if (availableHeight > 200 && availableWidth > 200) {
           const fitScaleHeight = availableHeight / 1180;
           const fitScaleWidth = availableWidth / 840;
@@ -67,7 +92,7 @@ export const LegoDesigner: React.FC<LegoDesignerProps> = ({ standalone }) => {
       window.removeEventListener('resize', updateAutoFitScale);
       clearTimeout(timer);
     };
-  }, [userInput, analysisResult, selectedTemplate, templateOptions, customTemplateHTML, setSchema, setScale, standalone]);
+  }, [setScale]);
 
   // Handle Dragging Divider for Left Sidebar
   const handleLeftMouseDown = (e: React.MouseEvent) => {
@@ -112,12 +137,12 @@ export const LegoDesigner: React.FC<LegoDesignerProps> = ({ standalone }) => {
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape' && isFullScreen) {
-        setIsFullScreen(false);
+        toggleFullScreen();
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isFullScreen]);
+  }, [isFullScreen, toggleFullScreen]);
 
   const containerClasses = standalone
     ? 'w-full h-full bg-slate-100 flex flex-col overflow-hidden select-none'
@@ -129,7 +154,7 @@ export const LegoDesigner: React.FC<LegoDesignerProps> = ({ standalone }) => {
     <div ref={containerRef} className={containerClasses}>
       <Toolbar
         isFullScreen={isFullScreen}
-        onToggleFullScreen={() => setIsFullScreen(!isFullScreen)}
+        onToggleFullScreen={toggleFullScreen}
         standalone={standalone}
       />
 
@@ -188,7 +213,10 @@ export const LegoDesigner: React.FC<LegoDesignerProps> = ({ standalone }) => {
 
         {/* Main Canvas */}
         <div className={mobileTab === 'canvas' ? 'flex-1 h-full flex overflow-hidden' : 'hidden md:flex flex-1 overflow-hidden'}>
-          <LegoCanvas />
+          <LegoCanvas
+            isFullScreen={isFullScreen}
+            onToggleFullScreen={toggleFullScreen}
+          />
         </div>
 
         {/* Right Resizer Divider */}

@@ -1,6 +1,6 @@
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
-import { renderTemplateHTML, type TemplateId } from "./resume-templates";
+import { renderTemplateHTML, getPageMarginValues, type TemplateId } from "./resume-templates";
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -80,31 +80,30 @@ export function formatResumeAsText(resume: import("@/types/resume").FinalResume)
   return lines.join("\n");
 }
 
-export function exportResumeAsWord(
+export async function exportResumeAsWord(
   resume: import("@/types/resume").FinalResume,
-  templateId: TemplateId = "modern-sidebar",
-  customTemplateHTML?: string,
+  _templateId?: TemplateId,
+  _customTemplateHTML?: string,
   options?: import("./resume-templates").TemplateOptions
 ) {
-  const innerHtml = renderTemplateHTML(resume, templateId, customTemplateHTML, options);
-  const htmlContent = `
-    <html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'>
-    ${innerHtml}
-    </html>
-  `;
-
-  const blob = new Blob(["\ufeff" + htmlContent], {
-    type: "application/msword;charset=utf-8",
-  });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  const name = resume?.personalInfo?.name || "个人简历";
-  a.download = `${name}_个人简历.doc`;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
+  try {
+    const { generateResumeDocx } = await import("@/lib/docx-exporter");
+    const blob = await generateResumeDocx(resume, {
+      themeColor: options?.themeColor,
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    const name = resume?.personalInfo?.name || "个人简历";
+    a.download = `${name}_精美简历.docx`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  } catch (err) {
+    console.error("Failed to export docx:", err);
+    alert("导出 Word 失败，请重试");
+  }
 }
 
 export function exportResumeAsPDF(
@@ -119,46 +118,72 @@ export function exportResumeAsPDF(
   const name = resume?.personalInfo?.name || "个人简历";
   const docTitle = `${name}_个人简历`;
   const htmlContent = renderTemplateHTML(resume, templateId, customTemplateHTML, options);
+  const { marginVal } = getPageMarginValues(options?.pageMargin);
 
   const printStyle = `
     <style>
       @page {
-        size: A4;
-        margin: 4mm !important;
+        size: A4 portrait;
+        margin: ${marginVal} !important;
       }
       @media print {
+        *, *::before, *::after {
+          -webkit-print-color-adjust: exact !important;
+          print-color-adjust: exact !important;
+        }
         html, body {
           width: 100% !important;
-          height: 100% !important;
+          height: auto !important;
           min-height: 100% !important;
           margin: 0 !important;
           padding: 0 !important;
           overflow: visible !important;
-          -webkit-print-color-adjust: exact !important;
-          print-color-adjust: exact !important;
           background: #ffffff !important;
         }
-        .container {
+        .container, .layout-container {
           display: table !important;
           width: 100% !important;
-          height: 100% !important;
+          height: auto !important;
           min-height: 100% !important;
+          overflow: visible !important;
         }
         .sidebar {
           display: table-cell !important;
           background-color: #f8fafc !important;
           border-right: 1px solid #e2e8f0 !important;
-          height: 100% !important;
-          -webkit-print-color-adjust: exact !important;
-          print-color-adjust: exact !important;
+          height: auto !important;
+          overflow: visible !important;
         }
-        .main {
+        .main, .main-content {
           display: table-cell !important;
-          height: 100% !important;
+          height: auto !important;
+          overflow: visible !important;
         }
-        .work-item, .project-item, .tl-item, .card-box, .sec-title, .sidebar-section {
-          page-break-inside: avoid !important;
+        /* 智能防截断核心规则 */
+        .sec-title, .main-title, .sidebar-title, .sidebar-sec-title, .main-sec-title,
+        .item-head, .item-header, h1, h2, h3, h4, h5, h6 {
+          break-after: avoid !important;
+          page-break-after: avoid !important;
           break-inside: avoid !important;
+          page-break-inside: avoid !important;
+        }
+        .work-item, .project-item, .tl-item, .card-box, .sidebar-section {
+          break-inside: avoid !important;
+          page-break-inside: avoid !important;
+          -webkit-column-break-inside: avoid !important;
+        }
+        li, p, .contact-item, .info-item, .skill-pill, .badge, .pill, .tag, .code-tag {
+          break-inside: avoid !important;
+          page-break-inside: avoid !important;
+          orphans: 2 !important;
+          widows: 2 !important;
+        }
+        img, .avatar-wrapper, .terminal-header, .banner {
+          break-inside: avoid !important;
+          page-break-inside: avoid !important;
+        }
+        .screen-only, .a4-page-guide, .page-break-guide {
+          display: none !important;
         }
         body > *:last-child,
         div:last-child,

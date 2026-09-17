@@ -1,5 +1,6 @@
 import { getAIConfig } from "@/lib/ai/config";
 import { LLMError } from "@/lib/ai/client";
+import { checkRateLimit } from "@/lib/rate-limit";
 import type { AnalyzeRequestBody } from "@/lib/ai/types";
 import { runMockResumeAnalysisStream } from "@/services/ai/resumeAgent.mock";
 import { runLLMResumeAnalysisStream } from "@/services/ai/resumeAgent.llm";
@@ -9,6 +10,22 @@ export const runtime = "nodejs";
 
 export async function POST(request: Request) {
   try {
+    const rateLimit = checkRateLimit(request, { maxRequests: 15, windowMs: 60_000 });
+    if (!rateLimit.success) {
+      return new Response(
+        JSON.stringify({ error: `请求过于频繁，请等待 ${rateLimit.resetInSeconds} 秒后再试` }),
+        {
+          status: 429,
+          headers: {
+            "Content-Type": "application/json",
+            "Retry-After": String(rateLimit.resetInSeconds),
+            "X-RateLimit-Limit": String(rateLimit.limit),
+            "X-RateLimit-Remaining": String(rateLimit.remaining),
+          },
+        }
+      );
+    }
+
     const body = (await request.json()) as AnalyzeRequestBody;
     const { input, optimizeStyle = "ai-product" } = body;
 

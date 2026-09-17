@@ -66,6 +66,25 @@ export function printLegoCanvas() {
     headStyles.push(node.outerHTML);
   });
 
+  // Read raw canvas height and compute total A4 pages
+  const rawHeight = parseFloat(canvasElement.style.height || '') || canvasElement.offsetHeight || 1160;
+  const canvasHeight = Math.max(1160, Math.round(rawHeight));
+  const totalPages = Math.max(1, Math.round(canvasHeight / 1160));
+  const canvasBg = canvasElement.style.backgroundColor || '#ffffff';
+
+  // Build multi-page HTML slices for A4 pages
+  const pagesHtml: string[] = [];
+  for (let i = 0; i < totalPages; i++) {
+    const isLast = i === totalPages - 1;
+    pagesHtml.push(`
+      <div class="lego-print-page" style="page-break-after: ${isLast ? 'auto' : 'always'}; break-after: ${isLast ? 'auto' : 'page'};">
+        <div class="lego-canvas-printed-page" style="transform: scale(calc(210mm / 820px)) translateY(-${i * 1160}px); transform-origin: top left; width: 820px; height: ${canvasHeight}px; position: relative; background: ${canvasBg}; ${pagePaddingCSS}">
+          ${clone.innerHTML}
+        </div>
+      </div>
+    `);
+  }
+
   // Construct print document HTML
   doc.open();
   doc.write(`
@@ -76,31 +95,48 @@ export function printLegoCanvas() {
         ${headStyles.join('\n')}
         <style>
           @page {
-            size: A4 portrait;
-            margin: 0;
+            size: 210mm 297mm;
+            margin: 0mm;
           }
           html, body {
+            width: 210mm !important;
             margin: 0 !important;
             padding: 0 !important;
             background: #ffffff !important;
-            font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            font-family: -apple-system, BlinkMacSystemFont, "Microsoft YaHei", "PingFang SC", "Hiragino Sans GB", "Heiti SC", "Segoe UI", Roboto, sans-serif;
             -webkit-print-color-adjust: exact !important;
             print-color-adjust: exact !important;
           }
-          #lego-canvas-page {
-            position: relative !important;
-            margin: 0 auto !important;
+          #print-container {
+            width: 210mm !important;
+            margin: 0 !important;
+            padding: 0 !important;
             background: #ffffff !important;
+          }
+          .lego-print-page {
+            width: 210mm !important;
+            height: 297mm !important;
+            max-width: 210mm !important;
+            max-height: 297mm !important;
+            overflow: hidden !important;
+            position: relative !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            box-sizing: border-box !important;
+            page-break-inside: avoid !important;
+            break-inside: avoid !important;
+          }
+          .lego-canvas-printed-page {
+            position: relative !important;
+            margin: 0 !important;
             box-shadow: none !important;
             border: none !important;
-            page-break-after: always;
-            box-sizing: border-box;
-            ${pagePaddingCSS}
+            box-sizing: border-box !important;
           }
-          #lego-canvas-page * {
+          .lego-canvas-printed-page * {
             box-sizing: border-box;
           }
-          #lego-canvas-page img {
+          .lego-canvas-printed-page img {
             width: 100% !important;
             height: 100% !important;
             object-fit: cover !important;
@@ -122,7 +158,9 @@ export function printLegoCanvas() {
         </style>
       </head>
       <body>
-        ${clone.outerHTML}
+        <div id="print-container">
+          ${pagesHtml.join('\n')}
+        </div>
       </body>
     </html>
   `);

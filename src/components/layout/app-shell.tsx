@@ -13,6 +13,7 @@ import { FollowUpStep } from "@/components/steps/follow-up-step";
 import { OptimizeStep } from "@/components/steps/optimize-step";
 import { InterviewStep } from "@/components/steps/interview-step";
 import { ExportStep } from "@/components/steps/export-step";
+import { StepErrorBoundary } from "@/components/shared/step-error-boundary";
 import { useResumeStore } from "@/store/resume-store";
 
 export function AppShell() {
@@ -68,7 +69,11 @@ export function AppShell() {
 
         {/* Main Content */}
         <main className="flex-1 overflow-y-auto bg-white p-4 md:p-6">
-          <div className="mx-auto max-w-5xl">{renderStep()}</div>
+          <div className="mx-auto max-w-5xl">
+            <StepErrorBoundary stepId={currentStep}>
+              {renderStep()}
+            </StepErrorBoundary>
+          </div>
         </main>
       </div>
     </div>

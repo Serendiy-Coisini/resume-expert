@@ -155,11 +155,14 @@ export async function POST(request: Request) {
 
       text = pdfData.text?.trim() || "";
 
-      if (!text) {
-        return NextResponse.json(
-          { error: "无法识别 PDF 文本内容。原因：该 PDF 可能是纯图片扫描件，或包含无法提取的加密文本。" },
-          { status: 400 }
-        );
+      // Scanned/Vector PDF detection: if text < 20 chars
+      const pureTextLength = text.replace(/\s+/g, "").length;
+      if (pureTextLength < 20) {
+        return NextResponse.json({
+          text: "",
+          isScannedPdf: true,
+          message: "检测到该简历为纯图片扫描版或矢量排版 PDF，将自动启动高精视觉识别 / OCR 提取文本",
+        });
       }
     } else {
       // Try mammoth docx auto fallback

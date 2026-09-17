@@ -2,7 +2,8 @@ import React, { useState, useRef, useEffect } from 'react';
 import { useLegoDesignerStore } from '@/store/lego-designer-store';
 import { WidgetRenderer } from './widgets/WidgetRenderer';
 import type { IWidget } from '@/types/lego';
-import { Layers, Copy, Trash2, ArrowUp, ArrowDown, Maximize } from 'lucide-react';
+import { Layers, Copy, Trash2, ArrowUp, ArrowDown, Maximize, Maximize2, Minimize2, Sparkles } from 'lucide-react';
+import { calculateTagWidth, reflowCanvasWidgetsForPagination } from '@/lib/lego-adapter';
 
 const A4_PAGE_HEIGHT = 1160;
 const SNAP_THRESHOLD = 5; // Pixels distance for magnetic snapping
@@ -13,7 +14,12 @@ const isTextWidget = (componentName: string) =>
   componentName === 'hj-li' ||
   componentName.startsWith('hj-date');
 
-export const LegoCanvas: React.FC = () => {
+export interface LegoCanvasProps {
+  isFullScreen?: boolean;
+  onToggleFullScreen?: () => void;
+}
+
+export const LegoCanvas: React.FC<LegoCanvasProps> = ({ isFullScreen, onToggleFullScreen }) => {
   const {
     schema,
     selectedWidgetIds,
@@ -32,7 +38,8 @@ export const LegoCanvas: React.FC = () => {
     pushHistoryState,
     undo,
     redo,
-    alignWidgets
+    alignWidgets,
+    setSchema
   } = useLegoDesignerStore();
 
   const [contextMenu, setContextMenu] = useState<{
@@ -409,7 +416,7 @@ export const LegoCanvas: React.FC = () => {
   }, [selectedWidgetIds, batchDeleteWidgets, batchMoveWidgets, schema, undo, redo]);
 
   const canvasHeight = schema.css?.height || 1160;
-  const pageBreakCount = Math.floor(canvasHeight / A4_PAGE_HEIGHT);
+  const pageBreakCount = Math.floor((canvasHeight - 20) / A4_PAGE_HEIGHT);
   const pageBreaks: number[] = [];
   for (let i = 1; i <= pageBreakCount; i++) {
     pageBreaks.push(i * A4_PAGE_HEIGHT);
@@ -674,6 +681,53 @@ export const LegoCanvas: React.FC = () => {
           >
             <Maximize className="w-4 h-4 text-indigo-500" /> 自适应高度
           </button>
+          <button
+            className="w-full px-3 py-1.5 text-left hover:bg-slate-100 flex items-center gap-2"
+            onClick={() => {
+              const ids = selectedWidgetIds.includes(contextMenu.widgetId)
+                ? selectedWidgetIds
+                : [contextMenu.widgetId];
+              ids.forEach((id) => {
+                for (const page of schema.componentsTree || []) {
+                  const w = page.children?.find((c) => c.id === id);
+                  if (w) {
+                    const raw = (w.dataSource?.text || w.dataSource?.workContent || '') as string;
+                    if (raw) {
+                      const clean = raw.replace(/<[^>]+>/g, '').trim();
+                      const fontSz = Number(w.css?.fontSize) || 11.5;
+                      updateWidgetCss(id, { width: calculateTagWidth(clean, fontSz) });
+                    }
+                  }
+                }
+              });
+              setContextMenu(null);
+            }}
+          >
+            <Sparkles className="w-4 h-4 text-blue-500" /> 自适应文字宽度
+          </button>
+          <button
+            className="w-full px-3 py-1.5 text-left hover:bg-amber-50 text-amber-700 flex items-center gap-2 font-medium"
+            onClick={() => {
+              pushHistoryState();
+              const reflowed = reflowCanvasWidgetsForPagination(schema);
+              setSchema(reflowed, false);
+              setContextMenu(null);
+            }}
+          >
+            <Sparkles className="w-4 h-4 text-amber-600" /> 智能分页防截断
+          </button>
+          {onToggleFullScreen && (
+            <button
+              className="w-full px-3 py-1.5 text-left hover:bg-indigo-50 text-indigo-700 flex items-center gap-2 font-medium"
+              onClick={() => {
+                onToggleFullScreen();
+                setContextMenu(null);
+              }}
+            >
+              {isFullScreen ? <Minimize2 className="w-4 h-4 text-indigo-600" /> : <Maximize2 className="w-4 h-4 text-indigo-600" />}
+              <span>{isFullScreen ? '退出全屏模式 (ESC)' : '进入全屏排版微调'}</span>
+            </button>
+          )}
           <button
             className="w-full px-3 py-1.5 text-left hover:bg-rose-50 text-rose-600 flex items-center gap-2"
             onClick={() => {

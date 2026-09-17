@@ -3,6 +3,7 @@ import { useLegoDesignerStore } from '@/store/lego-designer-store';
 import { useResumeStore } from '@/store/resume-store';
 import { PhotoManagerDialog } from './PhotoManagerDialog';
 import { applyThemeColorToSchema, THEME_COLOR_PRESETS, hslToHex, hexToHsl } from '@/lib/theme-utils';
+import { calculateTagWidth } from '@/lib/lego-adapter';
 import type { IHJSchema } from '@/types/lego';
 import {
   AlignLeft,
@@ -26,7 +27,8 @@ import {
   Briefcase,
   SlidersHorizontal,
   Camera,
-  Check
+  Check,
+  Sparkles
 } from 'lucide-react';
 
 interface RightSetterThemeSectionProps {
@@ -44,13 +46,16 @@ const RightSetterThemeSection: React.FC<RightSetterThemeSectionProps> = ({
 }) => {
   const rafRef = useRef<number | null>(null);
   const [localColor, setLocalColor] = useState(currentThemeColor);
+  const lastPreviewColorRef = useRef(currentThemeColor);
 
   useEffect(() => {
     setLocalColor(currentThemeColor);
+    lastPreviewColorRef.current = currentThemeColor;
   }, [currentThemeColor]);
 
   const handlePreviewColor = (color: string) => {
     setLocalColor(color);
+    lastPreviewColorRef.current = color;
     if (rafRef.current) {
       cancelAnimationFrame(rafRef.current);
     }
@@ -65,10 +70,12 @@ const RightSetterThemeSection: React.FC<RightSetterThemeSectionProps> = ({
       cancelAnimationFrame(rafRef.current);
       rafRef.current = null;
     }
-    setLocalColor(color);
-    const updated = applyThemeColorToSchema(schema, color);
+    const finalColor = color || lastPreviewColorRef.current;
+    setLocalColor(finalColor);
+    lastPreviewColorRef.current = finalColor;
+    const updated = applyThemeColorToSchema(schema, finalColor);
     setSchema(updated, true);
-    setTemplateOptions({ themeColor: color });
+    setTemplateOptions({ themeColor: finalColor });
   };
 
   const localHsl = hexToHsl(localColor);
@@ -135,9 +142,9 @@ const RightSetterThemeSection: React.FC<RightSetterThemeSectionProps> = ({
           step="1"
           value={localHsl.h}
           onChange={(e) => handleHuePreview(Number(e.target.value))}
-          onPointerUp={() => handleCommitColor(localColor)}
-          onMouseUp={() => handleCommitColor(localColor)}
-          onTouchEnd={() => handleCommitColor(localColor)}
+          onPointerUp={() => handleCommitColor(lastPreviewColorRef.current)}
+          onMouseUp={() => handleCommitColor(lastPreviewColorRef.current)}
+          onTouchEnd={() => handleCommitColor(lastPreviewColorRef.current)}
           className="w-full h-2.5 rounded-lg appearance-none cursor-pointer accent-blue-600"
           style={{
             background: 'linear-gradient(to right, #ef4444 0%, #f59e0b 17%, #eab308 33%, #10b981 50%, #06b6d4 67%, #3b82f6 83%, #ec4899 92%, #ef4444 100%)'
@@ -338,6 +345,29 @@ export const RightSetter: React.FC<RightSetterProps> = ({
     updateWidgetDataSource(selectedWidgetId, { qrCodeSrc: '', src: '', avatarSrc: '' });
     if (qrFileInputRef.current) {
       qrFileInputRef.current.value = '';
+    }
+  };
+
+  const handleAutoFitWidth = () => {
+    const ids = selectedWidgetIds.length > 0 ? selectedWidgetIds : (selectedWidgetId ? [selectedWidgetId] : []);
+    if (ids.length === 0) return;
+    const newSchema = JSON.parse(JSON.stringify(schema));
+    let changed = false;
+    for (const page of newSchema.componentsTree || []) {
+      for (const w of page.children || []) {
+        if (ids.includes(w.id)) {
+          const raw = (w.dataSource?.text || w.dataSource?.workContent || '') as string;
+          if (raw) {
+            const clean = raw.replace(/<[^>]+>/g, '').trim();
+            const fontSz = Number(w.css?.fontSize) || 11.5;
+            w.css.width = calculateTagWidth(clean, fontSz);
+            changed = true;
+          }
+        }
+      }
+    }
+    if (changed) {
+      setSchema(newSchema, true);
     }
   };
 
@@ -1240,6 +1270,19 @@ export const RightSetter: React.FC<RightSetterProps> = ({
                 }
               />
             </div>
+            {Boolean(dataSource?.text || dataSource?.workContent) && (
+              <div className="col-span-2 pt-1">
+                <button
+                  type="button"
+                  onClick={handleAutoFitWidth}
+                  className="w-full py-1.5 px-2 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 rounded-md text-[11px] font-semibold flex items-center justify-center gap-1.5 transition-colors cursor-pointer shadow-2xs"
+                  title="根据当前文字内容自动计算最佳自适应宽度"
+                >
+                  <Sparkles className="w-3.5 h-3.5 text-blue-600" />
+                  <span>⚡ 自动适配字数宽度</span>
+                </button>
+              </div>
+            )}
           </div>
 
           {/* Alignment Tools Card */}
@@ -1705,6 +1748,8 @@ export const RightSetter: React.FC<RightSetterProps> = ({
           />
         </div>
       </div>
+
+      <PhotoManagerDialog open={photoDialogOpen} onClose={() => setPhotoDialogOpen(false)} />
     </div>
   );
 };

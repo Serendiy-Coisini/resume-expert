@@ -101,12 +101,14 @@ type ArchivableState = Pick<
 function archiveIfAvailable(state: ArchivableState) {
   const { analysisResult, userInput } = state;
   if (!analysisResult || !userInput.jobDescription.trim()) return;
+  const safeUserInput = { ...userInput };
+  delete safeUserInput.rawFileDataUrl;
   useHistoryStore.getState().saveSession({
     id: state.sessionId,
     createdAt: Date.now(),
     targetRole: userInput.targetRole,
     jdExcerpt: userInput.jobDescription.replace(/\s+/g, " ").trim().slice(0, 80),
-    userInput,
+    userInput: safeUserInput as typeof userInput,
     analysisResult,
     currentStep: state.currentStep,
     maxReachedStepIndex: state.maxReachedStepIndex,
@@ -129,6 +131,10 @@ export const useResumeStore = create<ResumeStore>()(
       selectedTemplate: "modern-sidebar" as import("@/types/resume").TemplateId,
       templateOptions: {
         themeColor: "#1e3a8a",
+        avatarShape: "rectangle",
+        enableSmartPagination: true,
+        density: "normal",
+        pageMargin: "normal",
       },
       showPageBreakGuide: false,
       customTemplateHTML: DEFAULT_CUSTOM_TEMPLATE_HTML,
@@ -358,14 +364,18 @@ Axure · Figma · Python (数据分析) · SQL · Prompt Optimization · LangCha
     {
       name: "resume-expert-store",
       version: 1,
-      partialize: (state) => ({
-        userInput: state.userInput,
-        currentStep: state.currentStep,
-        analysisResult: state.analysisResult,
-        optimizeStyle: state.optimizeStyle,
-        maxReachedStepIndex: state.maxReachedStepIndex,
-        sessionId: state.sessionId,
-      }),
+      partialize: (state) => {
+        const safeUserInput = { ...(state.userInput || {}) };
+        delete safeUserInput.rawFileDataUrl;
+        return {
+          userInput: safeUserInput as typeof state.userInput,
+          currentStep: state.currentStep,
+          analysisResult: state.analysisResult,
+          optimizeStyle: state.optimizeStyle,
+          maxReachedStepIndex: state.maxReachedStepIndex,
+          sessionId: state.sessionId,
+        };
+      },
     }
   )
 );

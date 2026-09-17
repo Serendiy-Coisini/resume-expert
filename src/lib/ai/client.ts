@@ -68,54 +68,95 @@ async function requestChatCompletionJSON<T>(
   }
 }
 
+const RETRYABLE_STATUS_CODES = new Set([429, 500, 502, 503, 504]);
+
 async function callChatCompletions(
   config: ReturnType<typeof getAIConfig>,
   options: ChatCompletionOptions
 ) {
-  const response = await fetch(`${config.baseUrl}/chat/completions`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${config.apiKey}`,
-    },
-    body: JSON.stringify({
-      model: config.model,
-      temperature: options.temperature ?? 0.3,
-      max_tokens: options.maxTokens ?? 8192,
-      response_format: { type: "json_object" },
-      messages: [
-        { role: "system", content: options.system },
-        { role: "user", content: options.user },
-      ],
-    }),
-  });
+  const maxRetries = 2;
+  let attempt = 0;
 
-  if (!response.ok) {
-    const detail = await response.text().catch(() => "");
-    let userFriendlyMsg = "";
-    if (
-      response.status === 429 ||
-      detail.includes("insufficient_quota") ||
-      detail.includes("quota") ||
-      detail.includes("Allocated quota exceeded")
-    ) {
-      userFriendlyMsg = "AI 大模型 API Key 额度已用尽 (HTTP 429 Insufficient Quota)。请前往右上方「AI 配置」更换有效 Key，或点击下方重置为 Mock 免费模式。";
-    } else if (response.status === 401 || detail.includes("invalid_api_key")) {
-      userFriendlyMsg = "AI 大模型 API Key 无效或未授权 (HTTP 401 Unauthorized)。请前往右上方「AI 配置」重新检查密钥。";
-    } else {
-      userFriendlyMsg = detail
-        ? `大模型请求失败 (${response.status}): ${detail.slice(0, 200)}`
-        : `大模型请求失败 (${response.status})`;
+  while (attempt <= maxRetries) {
+    try {
+      const response = await fetch(`${config.baseUrl}/chat/completions`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${config.apiKey}`,
+        },
+        body: JSON.stringify({
+          model: config.model,
+          temperature: options.temperature ?? 0.3,
+          max_tokens: options.maxTokens ?? 8192,
+          response_format: { type: "json_object" },
+          messages: [
+            { role: "system", content: options.system },
+            { role: "user", content: options.user },
+          ],
+        }),
+        signal: AbortSignal.timeout(60_000),
+      });
+
+      if (!response.ok) {
+        const detail = await response.text().catch(() => "");
+        const isQuotaDepleted =
+          detail.includes("insufficient_quota") ||
+          detail.includes("quota exceeded") ||
+          detail.includes("Allocated quota exceeded");
+
+        // If retryable and quota is NOT permanently depleted, retry with backoff
+        if (
+          attempt < maxRetries &&
+          RETRYABLE_STATUS_CODES.has(response.status) &&
+          !isQuotaDepleted
+        ) {
+          attempt++;
+          const delayMs = attempt * 1000;
+          console.warn(`[callChatCompletions] Received HTTP ${response.status}. Retrying in ${delayMs}ms (attempt ${attempt}/${maxRetries})...`);
+          await new Promise((resolve) => setTimeout(resolve, delayMs));
+          continue;
+        }
+
+        let userFriendlyMsg = "";
+        if (response.status === 429 || isQuotaDepleted) {
+          userFriendlyMsg = "AI 大模型 API Key 额度已用尽 (HTTP 429 Insufficient Quota)。请前往右上方「AI 配置」更换有效 Key，或点击下方重置为 Mock 免费模式。";
+        } else if (response.status === 401 || detail.includes("invalid_api_key")) {
+          userFriendlyMsg = "AI 大模型 API Key 无效或未授权 (HTTP 401 Unauthorized)。请前往右上方「AI 配置」重新检查密钥。";
+        } else {
+          userFriendlyMsg = detail
+            ? `大模型请求失败 (${response.status}): ${detail.slice(0, 200)}`
+            : `大模型请求失败 (${response.status})`;
+        }
+        throw new LLMError(userFriendlyMsg, response.status);
+      }
+
+      return (await response.json()) as {
+        choices?: Array<{
+          finish_reason?: string;
+          message?: ChatMessage;
+        }>;
+      };
+    } catch (err) {
+      if (err instanceof LLMError) {
+        throw err;
+      }
+      if (attempt < maxRetries) {
+        attempt++;
+        const delayMs = attempt * 1000;
+        console.warn(`[callChatCompletions] Network/timeout error: ${(err as Error)?.message}. Retrying in ${delayMs}ms (attempt ${attempt}/${maxRetries})...`);
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+        continue;
+      }
+      throw new LLMError(
+        (err as Error)?.name === "TimeoutError"
+          ? "大模型请求超时 (60秒)，请重试或检查网络"
+          : (err as Error)?.message || "大模型请求失败"
+      );
     }
-    throw new LLMError(userFriendlyMsg, response.status);
   }
 
-  return (await response.json()) as {
-    choices?: Array<{
-      finish_reason?: string;
-      message?: ChatMessage;
-    }>;
-  };
+  throw new LLMError("大模型重试失败，请稍后重试");
 }
 
 function extractMessageContents(message?: ChatMessage): string[] {
