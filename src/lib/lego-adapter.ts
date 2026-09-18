@@ -318,16 +318,35 @@ export function reflowCanvasWidgetsForPagination(schema: IHJSchema): IHJSchema {
       handledIds.add(tw.id);
 
       // 寻找相伴的下划线 / 分割线 (例如 widget-sec-line-*)
+      // 注意：必须严格排除纵向时间轴竖线 (width <= 10 或包含 timeline-line)，仅匹配水平横向分割线
       const accompanyingLines = flowWidgets.filter((lw) => {
         if (handledIds.has(lw.id)) return false;
         const lTop = origTops.get(lw.id) || 0;
         const lH = Number(lw.css.height) || 0;
-        const isLine =
-          (lw.id || '').includes('sec-line') ||
-          (lw.id || '').includes('line-') ||
-          (lw.title || '').includes('分割线') ||
-          (lH <= 4 && (Number(lw.css.width) || 0) >= 260);
-        return isLine && Math.abs(lTop - (tTop + tH)) <= 15;
+        const lW = Number(lw.css.width) || 0;
+        const idLower = (lw.id || '').toLowerCase();
+        const titleLower = (lw.title || '').toLowerCase();
+
+        // 排除时间轴竖线及各类纵向构件
+        if (
+          idLower.includes('timeline-line') ||
+          idLower.includes('line-work') ||
+          idLower.includes('line-proj') ||
+          titleLower.includes('时间轴') ||
+          lW <= 10
+        ) {
+          return false;
+        }
+
+        const isHorizontalLine =
+          idLower.includes('sec-line') ||
+          idLower.includes('sec_line') ||
+          idLower.includes('header-line') ||
+          titleLower.includes('分割线') ||
+          titleLower.includes('下划线') ||
+          (lH <= 4 && lW >= 200);
+
+        return isHorizontalLine && Math.abs(lTop - (tTop + tH)) <= 15;
       });
 
       accompanyingLines.forEach((lw) => handledIds.add(lw.id));
@@ -396,8 +415,21 @@ export function reflowCanvasWidgetsForPagination(schema: IHJSchema): IHJSchema {
     // 4. 抽取经历/项目卡片（含时间轴节点 dot）
     flowWidgets.forEach((w) => {
       if (handledIds.has(w.id)) return;
-      if ((w.id || '').includes('line-work') || (w.id || '').includes('line-proj') || (w.title || '').includes('时间轴线')) {
+      const idLower = (w.id || '').toLowerCase();
+      const titleLower = (w.title || '').toLowerCase();
+
+      if (
+        idLower.includes('line-work') ||
+        idLower.includes('line-proj') ||
+        idLower.includes('timeline-line') ||
+        titleLower.includes('时间轴线')
+      ) {
         // 时间轴竖线排版后单独做端点延伸计算，不作为驱动块
+        return;
+      }
+
+      // 如果当前是 dot 圆点，先跳过，等待对应卡片将其作为伴随部件抽取
+      if (idLower.includes('dot') || w.componentName === 'hj-circle') {
         return;
       }
 
@@ -406,7 +438,10 @@ export function reflowCanvasWidgetsForPagination(schema: IHJSchema): IHJSchema {
 
       // 检测是否有伴随的时间轴圆点 (widget-tl-dot-*)
       const dotW = flowWidgets.find(
-        (dot) => !handledIds.has(dot.id) && (dot.id || '').includes('dot') && Math.abs((origTops.get(dot.id) || 0) - wTop) < 18
+        (dot) =>
+          !handledIds.has(dot.id) &&
+          ((dot.id || '').toLowerCase().includes('dot') || dot.componentName === 'hj-circle') &&
+          Math.abs((origTops.get(dot.id) || 0) - wTop) < 25
       );
 
       const members = [w];
@@ -421,6 +456,29 @@ export function reflowCanvasWidgetsForPagination(schema: IHJSchema): IHJSchema {
         members,
         origTop: wTop,
         height: wH,
+        isTitle: false
+      });
+    });
+
+    // 4.1 兜底：处理未被任何卡片绑定的孤立小部件
+    flowWidgets.forEach((w) => {
+      if (handledIds.has(w.id)) return;
+      const idLower = (w.id || '').toLowerCase();
+      const titleLower = (w.title || '').toLowerCase();
+      if (
+        idLower.includes('line-work') ||
+        idLower.includes('line-proj') ||
+        idLower.includes('timeline-line') ||
+        titleLower.includes('时间轴线')
+      ) {
+        return;
+      }
+      handledIds.add(w.id);
+      allUnits.push({
+        id: w.id,
+        members: [w],
+        origTop: origTops.get(w.id) || 0,
+        height: Number(w.css.height) || 20,
         isTitle: false
       });
     });
@@ -538,13 +596,47 @@ export function reflowCanvasWidgetsForPagination(schema: IHJSchema): IHJSchema {
         (w) => (w.id || '').includes(`line-${prefix}`) || (w.id || '').includes(`line_${prefix}`)
       );
       const sectionCards = page.children.filter(
-        (w) => (w.id || '').includes(`-${prefix}-`) || (w.id || '').includes(`_${prefix}_`)
+        (w) =>
+          ((w.id || '').includes(`-${prefix}-`) ||
+            (w.id || '').includes(`_${prefix}_`) ||
+            (prefix === 'proj' && ((w.id || '').includes('-project-') || (w.id || '').includes('_project_')))) &&
+          !((w.id || '').includes('timeline-line'))
       );
+
       if (lineW && sectionCards.length > 0) {
-        const minTop = Math.min(...sectionCards.map((c) => Number(c.css.top) || 9999));
-        const maxBot = Math.max(...sectionCards.map((c) => (Number(c.css.top) || 0) + (Number(c.css.height) || 0)));
-        lineW.css.top = minTop + 4;
-        lineW.css.height = Math.max(30, maxBot - minTop - 10);
+        // 如果该板块的经历跨越了多个 A4 页面，按页分段延伸时间轴线，杜绝竖线穿透页面白边/安全边距
+        const cardsByPage = new Map<number, IWidget[]>();
+        sectionCards.forEach((c) => {
+          const pIdx = Math.floor((Number(c.css.top) || 0) / A4_PAGE_HEIGHT);
+          if (!cardsByPage.has(pIdx)) cardsByPage.set(pIdx, []);
+          cardsByPage.get(pIdx)!.push(c);
+        });
+
+        const pagesWithCards = Array.from(cardsByPage.keys()).sort((a, b) => a - b);
+        if (pagesWithCards.length > 0) {
+          // 第一页使用原有 lineW
+          const firstPageCards = cardsByPage.get(pagesWithCards[0])!;
+          const minTop1 = Math.min(...firstPageCards.map((c) => Number(c.css.top) || 9999));
+          const maxBot1 = Math.max(...firstPageCards.map((c) => (Number(c.css.top) || 0) + (Number(c.css.height) || 0)));
+          lineW.css.top = minTop1 + 4;
+          lineW.css.height = Math.max(30, maxBot1 - minTop1 - 10);
+
+          // 如果跨多页，为后续页面生成对应的续接时间轴竖线
+          for (let p = 1; p < pagesWithCards.length; p++) {
+            const pageCards = cardsByPage.get(pagesWithCards[p])!;
+            const minTopP = Math.min(...pageCards.map((c) => Number(c.css.top) || 9999));
+            const maxBotP = Math.max(...pageCards.map((c) => (Number(c.css.top) || 0) + (Number(c.css.height) || 0)));
+            const segId = `widget-timeline-line-${prefix}-page-${pagesWithCards[p]}`;
+            let segLine = page.children.find((w) => w.id === segId);
+            if (!segLine) {
+              segLine = JSON.parse(JSON.stringify(lineW));
+              segLine!.id = segId;
+              page.children.push(segLine!);
+            }
+            segLine!.css.top = minTopP + 4;
+            segLine!.css.height = Math.max(30, maxBotP - minTopP - 10);
+          }
+        }
       }
     });
   };
