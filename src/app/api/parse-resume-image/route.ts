@@ -1,7 +1,48 @@
 import { NextResponse } from "next/server";
+import { safeAIFetch } from "@/lib/ai/safe-fetch";
 import path from "path";
 import { getAIConfig } from "@/lib/ai/config";
 import { createWorker } from "tesseract.js";
+import { rateLimitResponse } from "@/lib/rate-limit";
+
+const MAX_IMAGES = 4;
+const MAX_TOTAL_IMAGE_BYTES = 15 * 1024 * 1024;
+const OCR_ITEM_TIMEOUT_MS = 25_000;
+const MAX_IMAGE_PIXELS = 25_000_000;
+const MAX_CONCURRENT_OCR = 2;
+let activeOCRWorkers = 0;
+const ocrWaiters: Array<() => void> = [];
+
+async function acquireOCRSlot(): Promise<() => void> {
+  if (activeOCRWorkers >= MAX_CONCURRENT_OCR) {
+    await new Promise<void>((resolve) => ocrWaiters.push(resolve));
+  }
+  activeOCRWorkers++;
+  return () => {
+    activeOCRWorkers--;
+    ocrWaiters.shift()?.();
+  };
+}
+
+function readImageDimensions(buffer: Buffer): { width: number; height: number } | null {
+  if (buffer.length >= 24 && buffer.subarray(1, 4).toString() === "PNG") {
+    return { width: buffer.readUInt32BE(16), height: buffer.readUInt32BE(20) };
+  }
+  if (buffer.length >= 4 && buffer[0] === 0xff && buffer[1] === 0xd8) {
+    let offset = 2;
+    while (offset + 9 < buffer.length) {
+      if (buffer[offset] !== 0xff) { offset++; continue; }
+      const marker = buffer[offset + 1];
+      const length = buffer.readUInt16BE(offset + 2);
+      if (length < 2) break;
+      if ([0xc0, 0xc1, 0xc2, 0xc3, 0xc5, 0xc6, 0xc7, 0xc9, 0xca, 0xcb, 0xcd, 0xce, 0xcf].includes(marker)) {
+        return { height: buffer.readUInt16BE(offset + 5), width: buffer.readUInt16BE(offset + 7) };
+      }
+      offset += 2 + length;
+    }
+  }
+  return null;
+}
 
 export const maxDuration = 60;
 
@@ -24,33 +65,48 @@ function cleanOcrText(raw: string): string {
  * Recognize image buffer using local Tesseract OCR with chi_sim
  */
 async function runLocalOCR(imageBuffers: Buffer[]): Promise<string> {
-  const worker = await createWorker("chi_sim", 1, {
-    langPath: path.resolve(process.cwd()),
-    cachePath: path.resolve(process.cwd()),
-    gzip: false,
-  });
-
+  const releaseSlot = await acquireOCRSlot();
+  let worker: Awaited<ReturnType<typeof createWorker>> | null = null;
   try {
+    worker = await createWorker("chi_sim", 1, {
+      langPath: path.resolve(process.cwd()),
+      cachePath: path.resolve(process.cwd()),
+      gzip: false,
+    });
     const extractedParts: string[] = [];
     for (const buf of imageBuffers) {
-      const result = await worker.recognize(buf);
+      const result = await Promise.race([
+        worker.recognize(buf),
+        new Promise<never>((_, reject) => setTimeout(() => reject(new Error("OCR 识别超时")), OCR_ITEM_TIMEOUT_MS)),
+      ]);
       if (result.data?.text) {
         extractedParts.push(result.data.text);
       }
     }
     return cleanOcrText(extractedParts.join("\n\n"));
   } finally {
-    await worker.terminate().catch(() => {});
+    await worker?.terminate().catch(() => {});
+    releaseSlot();
   }
 }
 
 export async function POST(request: Request) {
   try {
+    const limited = rateLimitResponse(request, { maxRequests: 8, windowMs: 60_000 });
+    if (limited) return limited;
+    const declaredLength = Number(request.headers.get("content-length") || 0);
+    if (declaredLength > MAX_TOTAL_IMAGE_BYTES * 1.4) {
+      return NextResponse.json({ error: "图像请求大小超过上限" }, { status: 413 });
+    }
     const contentType = request.headers.get("content-type") || "";
     const images: string[] = [];
 
     if (contentType.includes("application/json")) {
-      const body = await request.json();
+      const rawBody = await request.text();
+      if (new TextEncoder().encode(rawBody).byteLength > MAX_TOTAL_IMAGE_BYTES * 1.4) {
+        return NextResponse.json({ error: "图像请求大小超过上限" }, { status: 413 });
+      }
+      const body = JSON.parse(rawBody) as { images?: unknown; image?: unknown };
       if (Array.isArray(body.images)) {
         images.push(...body.images.filter((img: unknown): img is string => typeof img === "string" && img.length > 0));
       } else if (typeof body.image === "string" && body.image.length > 0) {
@@ -59,8 +115,11 @@ export async function POST(request: Request) {
     } else {
       const formData = await request.formData();
       const files = formData.getAll("file") as File[];
+      if (files.length > MAX_IMAGES || files.reduce((total, file) => total + file.size, 0) > MAX_TOTAL_IMAGE_BYTES) {
+        return NextResponse.json({ error: "图片数量或累计大小超过上限" }, { status: 400 });
+      }
       for (const file of files) {
-        if (file && file.size > 0) {
+        if (file && file.size > 0 && file.type.startsWith("image/")) {
           const buf = Buffer.from(await file.arrayBuffer());
           const mime = file.type || "image/png";
           images.push(`data:${mime};base64,${buf.toString("base64")}`);
@@ -75,16 +134,29 @@ export async function POST(request: Request) {
     if (images.length === 0) {
       return NextResponse.json({ error: "未接收到有效的简历图像数据" }, { status: 400 });
     }
+    if (images.length > MAX_IMAGES) {
+      return NextResponse.json({ error: `一次最多识别 ${MAX_IMAGES} 张图片` }, { status: 400 });
+    }
 
     const config = getAIConfig(request);
 
     // Convert data URLs to buffers for potential OCR fallback
     const imageBuffers: Buffer[] = [];
     for (const imgUrl of images) {
-      const match = imgUrl.match(/^data:[^;]+;base64,(.+)$/);
+      const match = imgUrl.match(/^data:image\/(?:png|jpe?g|webp|bmp|gif);base64,([A-Za-z0-9+/=]+)$/i);
       if (match) {
         imageBuffers.push(Buffer.from(match[1], "base64"));
       }
+    }
+    const totalImageBytes = imageBuffers.reduce((total, buffer) => total + buffer.byteLength, 0);
+    if (imageBuffers.length !== images.length || totalImageBytes > MAX_TOTAL_IMAGE_BYTES) {
+      return NextResponse.json({ error: "图片格式无效或累计大小超过 15MB" }, { status: 400 });
+    }
+    if (imageBuffers.some((buffer) => {
+      const dimensions = readImageDimensions(buffer);
+      return dimensions && dimensions.width * dimensions.height > MAX_IMAGE_PIXELS;
+    })) {
+      return NextResponse.json({ error: "图片像素过大，单张最多支持 2500 万像素" }, { status: 400 });
     }
 
     // 1. Try AI Vision if configured and model might support vision
@@ -92,7 +164,7 @@ export async function POST(request: Request) {
       config.visionModel || config.model
     );
 
-    if (config.mode === "llm" && config.apiKey && !isExplicitTextOnlyModel) {
+    if (request.headers.get("x-pii-mask") === "off" && config.mode === "llm" && config.apiKey && !isExplicitTextOnlyModel) {
       const visionModelToUse = config.visionModel || config.model;
       try {
         const userContent: Array<{ type: string; text?: string; image_url?: { url: string } }> = [
@@ -109,7 +181,7 @@ export async function POST(request: Request) {
           });
         }
 
-        const response = await fetch(`${config.baseUrl}/chat/completions`, {
+        const response = await safeAIFetch(`${config.baseUrl}/chat/completions`, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
@@ -131,6 +203,7 @@ export async function POST(request: Request) {
               },
             ],
           }),
+          signal: AbortSignal.any([request.signal, AbortSignal.timeout(45_000)]),
         });
 
         if (response.ok) {

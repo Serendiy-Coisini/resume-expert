@@ -142,9 +142,6 @@ export default function SettingsPage() {
       setSelectedProvider("deepseek");
       setTestResult(null);
 
-      // 2. Clean up server state if any
-      await fetch("/api/settings", { method: "DELETE" }).catch(() => {});
-
       setResetSuccess(true);
       setTimeout(() => setResetSuccess(false), 4000);
     } catch {
@@ -170,19 +167,6 @@ export default function SettingsPage() {
         providerId: selectedProvider || "deepseek",
         provider: providerType,
       });
-
-      // 2. Notify save endpoint (no-op on server, but ensures consistency)
-      await fetch("/api/settings/save", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          apiKey: apiKey.trim(),
-          baseUrl,
-          model,
-          provider: providerType,
-          providerId: selectedProvider,
-        }),
-      }).catch(() => {});
 
       setSaved(true);
       setTimeout(() => setSaved(false), 4000);

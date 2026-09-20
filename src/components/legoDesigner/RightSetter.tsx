@@ -1,4 +1,5 @@
 import React, { useRef, useState, useEffect } from 'react';
+import { sanitizeRichText } from '@/lib/safe-html';
 import { useLegoDesignerStore } from '@/store/lego-designer-store';
 import { useResumeStore } from '@/store/resume-store';
 import { PhotoManagerDialog } from './PhotoManagerDialog';
@@ -379,7 +380,7 @@ export const RightSetter: React.FC<RightSetterProps> = ({
 
   React.useEffect(() => {
     if (editorRef.current && editorRef.current.innerHTML !== htmlContent) {
-      editorRef.current.innerHTML = htmlContent;
+      editorRef.current.innerHTML = sanitizeRichText(htmlContent);
     }
   }, [htmlContent, selectedWidget?.id]);
 

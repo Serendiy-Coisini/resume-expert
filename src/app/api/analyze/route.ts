@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { getAIConfig } from "@/lib/ai/config";
 import { LLMError } from "@/lib/ai/client";
 import { checkRateLimit } from "@/lib/rate-limit";
-import type { AnalyzeRequestBody } from "@/lib/ai/types";
+import { analyzeRequestSchema, parseJSONBody, RequestValidationError } from "@/lib/ai/request-validation";
 import { analyzeResumeServer } from "@/services/ai/resumeAgent.server";
 
 export async function POST(request: Request) {
@@ -22,7 +22,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const body = (await request.json()) as AnalyzeRequestBody;
+    const body = await parseJSONBody(request, analyzeRequestSchema);
     const { input, optimizeStyle = "ai-product" } = body;
 
     if (!input?.targetRole?.trim() || !input?.jobDescription?.trim() || !input?.originalResume?.trim()) {
@@ -30,9 +30,13 @@ export async function POST(request: Request) {
     }
 
     const config = getAIConfig(request);
-    const { result, mode } = await analyzeResumeServer(input, optimizeStyle, config);
+    const signal = AbortSignal.any([request.signal, AbortSignal.timeout(90_000)]);
+    const { result, mode } = await analyzeResumeServer(input, optimizeStyle, config, signal);
     return NextResponse.json({ result, mode });
   } catch (error) {
+    if (error instanceof RequestValidationError) {
+      return NextResponse.json({ error: error.message }, { status: error.status });
+    }
     const message =
       error instanceof LLMError
         ? error.message

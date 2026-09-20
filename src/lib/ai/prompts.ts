@@ -487,7 +487,7 @@ export function normalizeFollowUpQuestions(
       purpose: purposeText,
       userAnswer: item.userAnswer || "",
       presetBullet: preset,
-      generatedBullet: (item.generatedBullet || "").trim() || preset,
+      generatedBullet: "",
     };
   });
 }
@@ -647,10 +647,21 @@ export function updateFinalResumeWithOptimizedItems(
     updated.summary = summaryItem.after;
   }
 
-  // 2. Build map of before -> after for replacing bullet points
+  // 2. Only replace exact source bullets. Fuzzy prefixes can match another experience.
+  const sourceCounts = new Map<string, number>();
+  for (const bullet of [
+    ...(updated.workExperience ?? []).flatMap((item) => item.bullets),
+    ...(updated.projectExperience ?? []).flatMap((item) => item.bullets),
+  ]) {
+    const source = bullet.trim();
+    sourceCounts.set(source, (sourceCounts.get(source) ?? 0) + 1);
+  }
   const replacementMap = new Map<string, string>();
   optimizedItems.forEach((item) => {
-    if (item.before && item.after && item.before !== "（原简历无相关描述）") {
+    if (
+      item.before && item.after && item.before !== "（原简历无相关描述）" &&
+      sourceCounts.get(item.before.trim()) === 1
+    ) {
       replacementMap.set(item.before.trim(), item.after.trim());
     }
   });
@@ -662,16 +673,6 @@ export function updateFinalResumeWithOptimizedItems(
         const trimmed = bullet.trim();
         if (replacementMap.has(trimmed)) {
           return replacementMap.get(trimmed)!;
-        }
-        for (const item of optimizedItems) {
-          if (
-            item.before &&
-            item.after &&
-            item.before !== "（原简历无相关描述）" &&
-            (trimmed.includes(item.before.slice(0, 10)) || item.before.includes(trimmed.slice(0, 10)))
-          ) {
-            return item.after;
-          }
         }
         return bullet;
       });
@@ -686,16 +687,6 @@ export function updateFinalResumeWithOptimizedItems(
         const trimmed = bullet.trim();
         if (replacementMap.has(trimmed)) {
           return replacementMap.get(trimmed)!;
-        }
-        for (const item of optimizedItems) {
-          if (
-            item.before &&
-            item.after &&
-            item.before !== "（原简历无相关描述）" &&
-            (trimmed.includes(item.before.slice(0, 10)) || item.before.includes(trimmed.slice(0, 10)))
-          ) {
-            return item.after;
-          }
         }
         return bullet;
       });

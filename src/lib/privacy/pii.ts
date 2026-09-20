@@ -1,4 +1,4 @@
-import type { AnalysisResult, UserInput } from "@/types/resume";
+import type { UserInput } from "@/types/resume";
 
 export interface PIIAnonymizeResult {
   anonymizedInput: UserInput;
@@ -8,7 +8,7 @@ export interface PIIAnonymizeResult {
 /**
  * Anonymize sensitive PII data in UserInput before sending to external LLM APIs.
  */
-export function anonymizeUserInput(input: UserInput): PIIAnonymizeResult {
+export function anonymizePayload<T>(input: T, enabled = true): { value: T; piiMap: Map<string, string> } {
   const piiMap = new Map<string, string>();
   let phoneCounter = 1;
   let emailCounter = 1;
@@ -17,7 +17,7 @@ export function anonymizeUserInput(input: UserInput): PIIAnonymizeResult {
   let nameCounter = 1;
 
   const maskText = (text: string): string => {
-    if (!text) return text;
+    if (!text || !enabled) return text;
     let result = text;
 
     // 1. Chinese 18-digit ID card
@@ -62,7 +62,7 @@ export function anonymizeUserInput(input: UserInput): PIIAnonymizeResult {
 
     // 5. Explicit Name labels (e.g. 姓名：张三, 姓名: 李四)
     result = result.replace(
-      /(?:姓名|候选人|求职者)[:：\s]+([\u4e00-\u9fa5]{2,4})\b/g,
+      /(?:姓名|候选人|求职者)[:：\s]+([\u4e00-\u9fa5]{2,4})(?=$|[^\u4e00-\u9fa5])/g,
       (fullMatch, capturedName) => {
         const placeholder = `[PII_NAME_${nameCounter++}]`;
         piiMap.set(placeholder, capturedName);
@@ -73,14 +73,32 @@ export function anonymizeUserInput(input: UserInput): PIIAnonymizeResult {
     return result;
   };
 
-  const anonymizedInput: UserInput = {
-    ...input,
-    originalResume: maskText(input.originalResume),
-    additionalInfo: maskText(input.additionalInfo),
-    jobDescription: input.jobDescription, // JDs don't usually contain user PII, but keep as-is
+  const visit = (value: unknown, key = ""): unknown => {
+    if (typeof value === "string") {
+      let text = value;
+      if (enabled && (key === "originalResume" || key === "content")) {
+        text = text.replace(/^([\u4e00-\u9fa5]{2,4})(?=\s*\r?\n)/, (name) => {
+          const placeholder = `[PII_NAME_${nameCounter++}]`;
+          piiMap.set(placeholder, name);
+          return placeholder;
+        });
+      }
+      return maskText(text);
+    }
+    if (Array.isArray(value)) return value.map((item) => visit(item));
+    if (value && typeof value === "object") {
+      return Object.fromEntries(Object.entries(value)
+        .filter(([field]) => !["avatarUrl", "rawFileName", "rawFileType", "rawFileDataUrl"].includes(field))
+        .map(([field, item]) => [field, visit(item, field)]));
+    }
+    return value;
   };
+  return { value: visit(input) as T, piiMap };
+}
 
-  return { anonymizedInput, piiMap };
+export function anonymizeUserInput(input: UserInput): PIIAnonymizeResult {
+  const { value, piiMap } = anonymizePayload(input);
+  return { anonymizedInput: value, piiMap };
 }
 
 /**
@@ -98,22 +116,17 @@ export function restorePIIText(text: string, piiMap: Map<string, string>): strin
 /**
  * Deeply restore AnalysisResult values replacing PII placeholders with original values.
  */
-export function restoreAnalysisResult(
-  result: AnalysisResult,
+export function restoreAnalysisResult<T>(
+  result: T,
   piiMap: Map<string, string>
-): AnalysisResult {
+): T {
   if (!result || piiMap.size === 0) return result;
 
-  const jsonStr = JSON.stringify(result);
-  let restoredStr = jsonStr;
-
-  for (const [placeholder, original] of piiMap.entries()) {
-    restoredStr = restoredStr.replaceAll(placeholder, original);
-  }
-
-  try {
-    return JSON.parse(restoredStr) as AnalysisResult;
-  } catch {
-    return result;
-  }
+  const restore = (value: unknown): unknown => {
+    if (typeof value === "string") return restorePIIText(value, piiMap);
+    if (Array.isArray(value)) return value.map(restore);
+    if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, restore(item)]));
+    return value;
+  };
+  return restore(result) as T;
 }

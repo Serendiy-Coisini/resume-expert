@@ -1,3 +1,5 @@
+import { sanitizePrintHTML } from '@/lib/safe-html';
+
 export function printLegoCanvas() {
   const canvasElement = document.getElementById('lego-canvas-page');
   if (!canvasElement) {
@@ -87,7 +89,7 @@ export function printLegoCanvas() {
 
   // Construct print document HTML
   doc.open();
-  doc.write(`
+  doc.write(sanitizePrintHTML(`
     <!DOCTYPE html>
     <html>
       <head>
@@ -163,7 +165,7 @@ export function printLegoCanvas() {
         </div>
       </body>
     </html>
-  `);
+  `));
   doc.close();
 
   // Wait for images and fonts to fully load before triggering print

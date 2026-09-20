@@ -35,7 +35,8 @@ function isCanvasBlank(canvas: HTMLCanvasElement): boolean {
 
 export async function renderPdfPagesToImages(
   fileOrBuffer: File | ArrayBuffer | Uint8Array,
-  maxPages = 4
+  maxPages = 4,
+  onTruncated?: (totalPages: number, processedPages: number) => void
 ): Promise<string[]> {
   if (typeof window === 'undefined') {
     return [];
@@ -62,15 +63,18 @@ export async function renderPdfPagesToImages(
 
   const loadingTask = pdfjsLib.getDocument({
     data: new Uint8Array(arrayBuffer),
+    isEvalSupported: false, // CVE-2024-4367: never compile PDF-provided font programs.
     disableFontFace: false,
   });
 
   const pdfDoc = await loadingTask.promise;
   const totalPages = Math.min(pdfDoc.numPages, maxPages);
+  if (pdfDoc.numPages > maxPages) onTruncated?.(pdfDoc.numPages, maxPages);
   const images: string[] = [];
 
-  for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
-    const page = await pdfDoc.getPage(pageNum);
+  try {
+    for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
+      const page = await pdfDoc.getPage(pageNum);
     // 2.0x scale ensures crystal clear text for OCR / Vision models
     const viewport = page.getViewport({ scale: 2.0 });
 
@@ -78,8 +82,11 @@ export async function renderPdfPagesToImages(
     canvas.width = viewport.width;
     canvas.height = viewport.height;
 
-    const ctx = canvas.getContext('2d');
-    if (!ctx) continue;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) {
+        page.cleanup();
+        continue;
+      }
 
     // Fill white background before rendering
     ctx.fillStyle = '#ffffff';
@@ -92,16 +99,21 @@ export async function renderPdfPagesToImages(
       viewport: viewport,
     };
 
-    await page.render(renderContext).promise;
+      await page.render(renderContext).promise;
 
     // Skip trailing blank pages (like print page-break blank 2nd page)
     if (pageNum > 1 && isCanvasBlank(canvas)) {
-      continue;
+        page.cleanup();
+        continue;
     }
 
     // High-quality JPEG data URL for compact and fast transmission
     const dataUrl = canvas.toDataURL('image/jpeg', 0.92);
-    images.push(dataUrl);
+      images.push(dataUrl);
+      page.cleanup();
+    }
+  } finally {
+    await pdfDoc.destroy();
   }
 
   return images;

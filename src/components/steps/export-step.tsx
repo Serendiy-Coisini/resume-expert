@@ -71,10 +71,10 @@ export function ExportStep() {
     return "";
   }, [userInput.rawFileType, userInput.rawFileDataUrl]);
 
-  if (!analysisResult) {
+  if (!analysisResult?.finalResume) {
     return (
       <EmptyState
-        message="请先完成输入材料并开始分析"
+        message="尚未生成完整简历，请返回输入材料重试分析"
         actionLabel="返回输入材料"
         onAction={() => setCurrentStep("input")}
       />
@@ -526,12 +526,12 @@ export function ExportStep() {
               <Download className="h-4 w-4" />
               导出所选模板文件
             </CardTitle>
-            <CardDescription>导出带所选样式的 Word (.doc) 或打印保存为高清 PDF</CardDescription>
+            <CardDescription>PDF 保留当前模板视觉样式；Word 为可编辑内容版，不保留画布及自定义 HTML 的精确排版</CardDescription>
           </CardHeader>
           <CardContent className="flex flex-col sm:flex-row gap-2">
             <Button onClick={handleExportWord} variant="outline" className="flex-1">
               <FileSpreadsheet className="h-4 w-4 text-blue-600" />
-              导出 Word 文档
+              导出 Word 内容版
             </Button>
             <Button onClick={handleExportPDF} variant="outline" className="flex-1">
               <Printer className="h-4 w-4 text-emerald-600" />
@@ -683,6 +683,7 @@ export function ExportStep() {
 
           <div className="pt-2 border-t border-indigo-100/80 flex flex-wrap gap-2.5">
             <Button
+              disabled={!analysisResult.jdAnalysis || !analysisResult.diagnosis || !analysisResult.matchItems || !analysisResult.interviewPrep}
               onClick={() => exportFullAnalysisAsPDF(userInput, analysisResult)}
               className="flex-1 min-w-[240px] bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-700 hover:to-blue-700 text-white shadow-md shadow-indigo-500/20 font-bold text-xs py-5"
             >

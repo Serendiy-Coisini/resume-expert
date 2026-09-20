@@ -44,6 +44,7 @@ if (typeof setInterval !== "undefined") {
  * Extracts client IP from standard proxy headers or falls back to loopback.
  */
 export function getClientIp(req: Request): string {
+  if (process.env.TRUST_PROXY_HEADERS !== "true") return "untrusted-client";
   const xForwardedFor = req.headers.get("x-forwarded-for");
   if (xForwardedFor) {
     const clientIp = xForwardedFor.split(",")[0]?.trim();
@@ -58,6 +59,20 @@ export function getClientIp(req: Request): string {
   return "127.0.0.1";
 }
 
+export function rateLimitResponse(req: Request, options: RateLimitOptions = {}): Response | null {
+  const result = checkRateLimit(req, options);
+  if (result.success) return null;
+  return new Response(JSON.stringify({ error: `请求过于频繁，请等待 ${result.resetInSeconds} 秒后再试` }), {
+    status: 429,
+    headers: {
+      "Content-Type": "application/json",
+      "Retry-After": String(result.resetInSeconds),
+      "X-RateLimit-Limit": String(result.limit),
+      "X-RateLimit-Remaining": String(result.remaining),
+    },
+  });
+}
+
 /**
  * Checks if the incoming request is within the rate limit.
  */
@@ -67,10 +82,11 @@ export function checkRateLimit(
 ): RateLimitResult {
   const { maxRequests = 15, windowMs = 60_000 } = options;
   const ip = getClientIp(req);
+  const key = `${new URL(req.url).pathname}:${ip}`;
   const now = Date.now();
   const windowStart = now - windowMs;
 
-  const timestamps = ipRequestsMap.get(ip) || [];
+  const timestamps = ipRequestsMap.get(key) || [];
   // Filter only timestamps in the current window
   const validTimestamps = timestamps.filter((t) => t > windowStart);
 
@@ -86,7 +102,7 @@ export function checkRateLimit(
   }
 
   validTimestamps.push(now);
-  ipRequestsMap.set(ip, validTimestamps);
+  ipRequestsMap.set(key, validTimestamps);
 
   const remaining = Math.max(0, maxRequests - validTimestamps.length);
   const resetInSeconds = Math.ceil(windowMs / 1000);

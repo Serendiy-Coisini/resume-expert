@@ -34,8 +34,9 @@ export function OptimizeStep() {
     userInput,
     optimizeStyle,
     setOptimizeStyle,
-    setAnalysisResult,
+    patchAnalysisResult,
     setCurrentStep,
+    sessionId,
   } = useResumeStore();
   const [regenerating, setRegenerating] = useState(false);
   const [optimizeError, setOptimizeError] = useState<string | null>(null);
@@ -52,18 +53,21 @@ export function OptimizeStep() {
 
   const handleStyleChange = async (style: OptimizeStyle) => {
     setOptimizeStyle(style);
+    const startedSessionId = sessionId;
     setRegenerating(true);
     setOptimizeError(null);
     try {
       const { optimizedItems: items, finalResume: newFinalResume } = await regenerateOptimizedItems(userInput, style);
+      const currentResult = useResumeStore.getState().analysisResult;
+      if (useResumeStore.getState().sessionId !== startedSessionId || !currentResult) return;
       const updatedFinalResume =
         newFinalResume ||
-        updateFinalResumeWithOptimizedItems(analysisResult.finalResume, items);
-      setAnalysisResult({
-        ...analysisResult,
+        updateFinalResumeWithOptimizedItems(currentResult.finalResume, items);
+      patchAnalysisResult({
         optimizedItems: items,
         finalResume: updatedFinalResume,
-      });
+        englishResume: undefined,
+      }, startedSessionId);
     } catch (error) {
       setOptimizeError(error instanceof Error ? error.message : "优化生成失败");
     } finally {

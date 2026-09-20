@@ -1,10 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
+import { safeAIFetch } from "@/lib/ai/safe-fetch";
+import { parseJSONBody, RequestValidationError, settingsTestRequestSchema } from "@/lib/ai/request-validation";
+import { rateLimitResponse } from "@/lib/rate-limit";
 
 export const dynamic = "force-dynamic";
 
 export async function POST(req: NextRequest) {
   try {
-    const { apiKey, baseUrl, model } = await req.json();
+    const limited = rateLimitResponse(req, { maxRequests: 8, windowMs: 60_000 });
+    if (limited) return limited;
+    const { apiKey, baseUrl, model } = await parseJSONBody(req, settingsTestRequestSchema, 32 * 1024);
 
     if (!apiKey?.trim()) {
       return NextResponse.json({ success: false, error: "API Key 不能为空" });
@@ -12,7 +17,7 @@ export async function POST(req: NextRequest) {
 
     const url = `${(baseUrl || "https://api.openai.com/v1").replace(/\/$/, "")}/chat/completions`;
 
-    const response = await fetch(url, {
+    const response = await safeAIFetch(url, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -23,6 +28,7 @@ export async function POST(req: NextRequest) {
         messages: [{ role: "user", content: "你好" }],
         max_tokens: 15,
       }),
+      signal: AbortSignal.any([req.signal, AbortSignal.timeout(20_000)]),
     });
 
     if (!response.ok) {
@@ -50,6 +56,9 @@ export async function POST(req: NextRequest) {
       message: `AI 响应正常！回复内容: "${reply.trim()}"`,
     });
   } catch (error) {
+    if (error instanceof RequestValidationError) {
+      return NextResponse.json({ success: false, error: error.message }, { status: error.status });
+    }
     const errMsg = error instanceof Error ? error.message : "未知错误";
     return NextResponse.json({ success: false, error: `连接失败: ${errMsg}` });
   }

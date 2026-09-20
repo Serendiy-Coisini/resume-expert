@@ -1,10 +1,8 @@
 /**
  * Zod schemas for validating LLM response JSON.
  *
- * Design: every leaf field uses `.catch(default)` so that missing or
- * wrong-typed fields are silently replaced with safe defaults instead
- * of throwing. This makes the schemas maximally lenient — they coerce
- * partial / malformed LLM output into a valid structure.
+ * Optional details receive render-safe defaults. Each stage also performs
+ * a content-integrity check so malformed output cannot masquerade as success.
  */
 
 import { z } from "zod";
@@ -144,7 +142,13 @@ export const jdAnalysisResponseSchema = z
   .object({
     jdAnalysis: jdAnalysisObjectSchema,
   })
-  .passthrough();
+  .passthrough()
+  .refine(({ jdAnalysis }) =>
+    jdAnalysis.responsibilities.length > 0 ||
+    jdAnalysis.hardRequirements.length > 0 ||
+    jdAnalysis.keywords.length > 0 ||
+    jdAnalysis.idealCandidate.trim().length > 0,
+  { message: "JD 解析结果缺少有效内容" });
 
 /** Step 2: Diagnosis + match + follow-up questions. */
 export const diagnosisMatchResponseSchema = z
@@ -153,33 +157,54 @@ export const diagnosisMatchResponseSchema = z
     matchItems: z.array(matchItemSchema).catch([]),
     followUpQuestions: z.array(followUpQuestionSchema).catch([]),
   })
-  .passthrough();
+  .passthrough()
+  .refine(({ diagnosis, matchItems }) =>
+    diagnosis.dimensionScores.length > 0 ||
+    diagnosis.mainIssues.length > 0 ||
+    diagnosis.prioritySuggestions.length > 0 ||
+    matchItems.length > 0,
+  { message: "诊断结果缺少有效内容" });
 
 /** Step 3: Optimized items + final resume. */
 export const optimizeResumeResponseSchema = z
   .object({
     optimizedItems: z.array(optimizedItemSchema).catch([]),
     finalResume: finalResumeObjectSchema,
+    englishResume: finalResumeObjectSchema.optional(),
   })
-  .passthrough();
+  .passthrough()
+  .refine(({ optimizedItems, finalResume }) =>
+    optimizedItems.length > 0 && (
+      finalResume.summary.trim().length > 0 ||
+      finalResume.workExperience.length > 0 ||
+      finalResume.projectExperience.length > 0
+    ),
+  { message: "简历优化结果不完整" });
 
 /** Step 4: Interview preparation. */
 export const interviewResponseSchema = z
   .object({
     interviewPrep: interviewPrepObjectSchema,
   })
-  .passthrough();
+  .passthrough()
+  .refine(({ interviewPrep }) =>
+    interviewPrep.likelyQuestions.length > 0 ||
+    interviewPrep.evidenceToPrepare.length > 0 ||
+    interviewPrep.selfIntroduction.trim().length > 0,
+  { message: "面试准备结果缺少有效内容" });
 
 /** Re-optimize (style change). */
 export const optimizedItemsResponseSchema = z
   .object({
     optimizedItems: z.array(optimizedItemSchema).catch([]),
   })
-  .passthrough();
+  .passthrough()
+  .refine(({ optimizedItems }) => optimizedItems.length > 0, { message: "改写结果为空" });
 
 /** Single bullet generation. */
 export const bulletResponseSchema = z
   .object({
     bullet: z.string().catch(""),
   })
-  .passthrough();
+  .passthrough()
+  .refine(({ bullet }) => bullet.trim().length > 0, { message: "Bullet 结果为空" });

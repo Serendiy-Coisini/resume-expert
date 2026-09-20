@@ -6,7 +6,7 @@
 
 ![Next.js](https://img.shields.io/badge/Next.js-15.5-black?style=for-the-badge&logo=next.js)
 ![TypeScript](https://img.shields.io/badge/TypeScript-5.0-blue?style=for-the-badge&logo=typescript)
-![Tailwind CSS](https://img.shields.io/badge/Tailwind_CSS-v4-06B6D4?style=for-the-badge&logo=tailwindcss)
+![Tailwind CSS](https://img.shields.io/badge/Tailwind_CSS-v3-06B6D4?style=for-the-badge&logo=tailwindcss)
 ![Zustand](https://img.shields.io/badge/Zustand-State_Management-764ABC?style=for-the-badge)
 ![License](https://img.shields.io/badge/License-MIT-green?style=for-the-badge)
 
@@ -40,9 +40,9 @@
 - 🎭 **Mock 演示与离线体验模式**
   - 未配置 API Key 时自动启动 Mock 模式，不消耗 Token、零费用，内置高保真专业简历范例，方便零门槛体验全流程。
 - 🔒 **Privacy-First 隐私安全**
-  - 敏感信息 (PII) 本地自动脱敏，API Key 仅保存在本地设备/环境变量，绝不出域或上传第三方服务器。
+  - 敏感信息 (PII) 在发送模型前自动脱敏；页面配置的 API Key 仅持久化在当前浏览器，调用时经本应用服务端内存转发给所选模型服务商，不写入服务端磁盘。
 - 📄 **ATS 友好与多格式导出**
-  - 支持导出高保真 **矢量 PDF**（文字可高亮复制，ATS 筛选系统 100% 识别）、**Word (.docx)** 及 **纯文本格式**。
+  - 支持导出文字可复制的 **PDF**、便于继续编辑的 **Word (.docx)** 内容版及 **纯文本格式**；实际 ATS 解析效果取决于模板和招聘系统。
 
 ---
 
@@ -77,10 +77,10 @@
 ## 🛠️ 技术栈
 
 - **框架与构建**：Next.js 15 (App Router), React 19, TypeScript
-- **样式与 UI**：Tailwind CSS, shadcn/ui, Lucide Icons, Framer Motion
+- **样式与 UI**：Tailwind CSS, shadcn/ui, Lucide Icons
 - **状态管理**：Zustand (支持持久化与历史撤销重做)
-- **文档生成与导出**：html2pdf.js / html2canvas, docx.js
-- **AI 架构**：Vercel AI SDK / OpenAI Client (支持 Server-Sent Events 流式输出)
+- **文档生成与导出**：jsPDF / html2canvas, docx.js
+- **AI 架构**：服务端 OpenAI 兼容 HTTP 适配层（支持 Server-Sent Events 流式输出）
 
 ---
 
@@ -121,8 +121,8 @@ npm run dev
 
 > 💡 **免重复配置与多用户隔离保障**：
 > - **持久化免重复输入**：配置采用浏览器本地存储（`localStorage`）安全持久保存，下次访问、刷新或关闭浏览器后重新进入**自动生效，无需每次重新输入**。
-> - **零服务端落盘**：API Key 仅保存在当前访问者本地浏览器中，绝不上报或存储在服务器磁盘，多用户之间物理级隔离，彻底杜绝公网泄露风险。
-> - **请求级安全透传**：调用 AI 服务时通过单次请求头动态传递，后端仅在当前请求内存中使用，不留任何痕迹。
+> - **零服务端落盘**：API Key 仅持久化在当前访问者的浏览器中，不保存到应用服务器磁盘。
+> - **请求级透传**：调用 AI 服务时通过单次请求头传给应用后端，后端仅在当前请求内存中使用，并转发给所选模型服务商。请只在可信部署环境中配置 Key。
 
 ### 方式 B：环境变量文件配置 (`.env.local`)
 在项目根目录创建或编辑 `.env.local` 文件：
@@ -131,6 +131,9 @@ npm run dev
 # 必填：您的 API Key
 LLM_API_KEY=sk-xxxx...
 
+# 显式允许服务端使用上述 Key；未开启时仍使用 Mock 模式
+ALLOW_SERVER_LLM_KEY=true
+
 # 可选：API 服务 Base URL
 LLM_BASE_URL=https://api.deepseek.com/v1
 
@@ -138,7 +141,7 @@ LLM_BASE_URL=https://api.deepseek.com/v1
 LLM_MODEL=deepseek-chat
 
 # 可选：服务商 ID (deepseek | siliconflow | openai | moonshot | custom)
-LLM_PROVIDER_ID=deepseek
+LLM_PROVIDER=deepseek
 ```
 
 ### 常见服务商配置对照表
@@ -192,10 +195,10 @@ resume-expert/
 **A**: **Mock 模式（演示与离线模拟数据模式）**：当您未配置 API Key 时系统自动开启。无需填 Key、不消耗 Token、零费用。系统内置了一套高保真专业简历的离线诊断与改写范例，方便您零门槛体验诊断对齐、启发式追问、积木排版与 PDF 导出的全流程。配置并保存自己的 API Key 后，系统将自动无缝切换至真实大模型实时分析重构模式。
 
 ### Q: 使用自己的 API Key 大概需要多少费用？
-**A**: 深度分析一份完整简历（包括 JD 拆解、缺口分析、启发式追问与 STAR 改写）大约消耗 3000~6000 Token。以 DeepSeek 为例，单次分析成本仅约 0.01~0.03 元，极其划算！
+**A**: 消耗量取决于简历、JD 长度、重试次数和所选模型。请以模型服务商当前的计费页面和实际用量为准。
 
 ### Q: 我的 API Key 安全吗？
-**A**: 完全安全。API Key 仅保存在你自己电脑本地浏览器存储或私有配置文件（`.env.local`）中，绝不会被上传、共享或出售给任何第三方服务器。
+**A**: 页面配置的 Key 仅持久化在浏览器；环境变量 Key 保存在部署环境。真实模型调用时，Key 会经本应用服务端内存转发给所选模型服务商，因此应使用可信部署、HTTPS 和权限受限的专用 Key。
 
 ---
 

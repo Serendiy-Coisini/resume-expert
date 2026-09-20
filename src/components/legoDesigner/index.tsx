@@ -7,6 +7,7 @@ import { useLegoDesignerStore } from '@/store/lego-designer-store';
 import { useResumeStore } from '@/store/resume-store';
 import { buildLegoSchemaFromResume } from '@/lib/lego-adapter';
 import { Layout, PlusCircle, Settings } from 'lucide-react';
+import { useShallow } from 'zustand/react/shallow';
 
 export interface LegoDesignerProps {
   standalone?: boolean;
@@ -19,8 +20,16 @@ export const LegoDesigner: React.FC<LegoDesignerProps> = ({
   isFullScreen: propIsFullScreen,
   onToggleFullScreen: propOnToggleFullScreen,
 }) => {
-  const { schema, setSchema, setScale } = useLegoDesignerStore();
-  const { userInput, analysisResult, selectedTemplate, templateOptions, customTemplateHTML } = useResumeStore();
+  const { schema, setSchema, setScale } = useLegoDesignerStore(useShallow((state) => ({
+    schema: state.schema, setSchema: state.setSchema, setScale: state.setScale,
+  })));
+  const { userInput, analysisResult, selectedTemplate, templateOptions, customTemplateHTML } = useResumeStore(useShallow((state) => ({
+    userInput: state.userInput,
+    analysisResult: state.analysisResult,
+    selectedTemplate: state.selectedTemplate,
+    templateOptions: state.templateOptions,
+    customTemplateHTML: state.customTemplateHTML,
+  })));
 
   const [internalFullScreen, setInternalFullScreen] = useState(false);
   const isFullScreen = propIsFullScreen !== undefined ? propIsFullScreen : internalFullScreen;
@@ -46,14 +55,13 @@ export const LegoDesigner: React.FC<LegoDesignerProps> = ({
 
   const containerRef = useRef<HTMLDivElement>(null);
   const lastTemplateRef = useRef<string | null>(null);
-  const isInitializedRef = useRef(false);
 
   // Initialize or re-template schema only when appropriate (first load, empty canvas, or explicit layout template change)
   useEffect(() => {
     const currentChildren = schema.componentsTree?.[0]?.children || [];
     const isTemplateChanged = lastTemplateRef.current !== null && lastTemplateRef.current !== selectedTemplate;
 
-    if (!isInitializedRef.current || currentChildren.length === 0 || isTemplateChanged) {
+    if (currentChildren.length === 0 || isTemplateChanged) {
       const initialSchema = buildLegoSchemaFromResume(
         userInput,
         analysisResult,
@@ -62,9 +70,8 @@ export const LegoDesigner: React.FC<LegoDesignerProps> = ({
         customTemplateHTML
       );
       setSchema(initialSchema, false);
-      isInitializedRef.current = true;
-      lastTemplateRef.current = selectedTemplate;
     }
+    lastTemplateRef.current = selectedTemplate;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedTemplate, setSchema]);
 

@@ -434,7 +434,9 @@ export const ImportResumeDialog: React.FC<ImportResumeDialogProps> = ({ open, on
             message: `检测到矢量排版/纯图片扫描版 PDF，正在启动智能视觉 / OCR 引擎提炼文字...`
           });
 
-          const pageImages = await renderPdfPagesToImages(file, 4);
+          const pageImages = await renderPdfPagesToImages(file, 4, (total) => {
+            showToast('info', `该 PDF 共 ${total} 页，当前 OCR 仅处理前 4 页`);
+          });
           if (!pageImages || pageImages.length === 0) {
             throw new Error('未能从 PDF 中提取出有效页面图像');
           }

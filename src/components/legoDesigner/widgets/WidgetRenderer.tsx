@@ -1,4 +1,5 @@
 import React from 'react';
+import { sanitizeRichText } from '@/lib/safe-html';
 import type { IWidget } from '@/types/lego';
 import { User, Image as ImageIcon, Smile, Mail, MapPin, Phone, Github, Linkedin, Camera, Star } from 'lucide-react';
 
@@ -14,7 +15,7 @@ export function renderFormattedText(text: string) {
     .replace(/\[size=(.*?)\](.*?)\[\/size\]/g, '<span style="font-size:$1px;">$2</span>')
     .replace(/\[bg=(.*?)\](.*?)\[\/bg\]/g, '<mark style="background-color:$1;padding:0 4px;border-radius:3px;">$2</mark>');
 
-  return <span dangerouslySetInnerHTML={{ __html: html }} />;
+  return <span dangerouslySetInnerHTML={{ __html: sanitizeRichText(html) }} />;
 }
 
 interface WidgetRendererProps {

@@ -1,5 +1,15 @@
 import type { AIMode } from "@/lib/ai/types";
 import { validateAndSanitizeBaseUrl } from "@/lib/ai/ssrf";
+import { z } from "zod";
+
+const browserConfigSchema = z.object({
+  apiKey: z.string().trim().min(1).max(512),
+  baseUrl: z.string().trim().max(2_000).optional(),
+  model: z.string().trim().max(200).optional(),
+  visionModel: z.string().trim().max(200).optional(),
+  provider: z.string().trim().max(100).optional(),
+  providerId: z.string().trim().max(100).optional(),
+}).strict();
 
 export interface AIConfig {
   mode: AIMode;
@@ -11,9 +21,12 @@ export interface AIConfig {
 }
 
 export function getAIConfig(req?: Request): AIConfig {
+  if (req?.headers.get("x-ai-mode") === "mock") {
+    return { mode: "mock", apiKey: "", baseUrl: "", model: "", visionModel: "", provider: "mock" };
+  }
   if (req) {
     const rawHeader = req.headers.get("x-llm-config");
-    if (rawHeader) {
+    if (rawHeader && rawHeader.length <= 16_384) {
       let parsed: {
         apiKey?: string;
         baseUrl?: string;
@@ -23,7 +36,9 @@ export function getAIConfig(req?: Request): AIConfig {
         providerId?: string;
       } | null = null;
       try {
-        parsed = JSON.parse(decodeURIComponent(rawHeader));
+        const candidate = JSON.parse(decodeURIComponent(rawHeader));
+        const validated = browserConfigSchema.safeParse(candidate);
+        parsed = validated.success ? validated.data : null;
       } catch (err) {
         console.warn("[getAIConfig] Failed to parse x-llm-config header:", err);
       }
@@ -50,7 +65,8 @@ export function getAIConfig(req?: Request): AIConfig {
 
   const apiKey = process.env.LLM_API_KEY?.trim() ?? "";
   const forceMock = process.env.USE_MOCK_AI === "true";
-  const mode: AIMode = !forceMock && apiKey ? "llm" : "mock";
+  const allowServerKey = process.env.ALLOW_SERVER_LLM_KEY === "true";
+  const mode: AIMode = !forceMock && apiKey && allowServerKey ? "llm" : "mock";
 
   return {
     mode,
@@ -66,6 +82,7 @@ export function getPublicAIStatus() {
   const config = getAIConfig();
   const forceMock = process.env.USE_MOCK_AI === "true";
   const missingApiKey = !config.apiKey;
+  const serverKeyDisabled = Boolean(config.apiKey) && process.env.ALLOW_SERVER_LLM_KEY !== "true";
 
   return {
     mode: config.mode,
@@ -77,6 +94,8 @@ export function getPublicAIStatus() {
           ? "forced"
           : missingApiKey
             ? "missing_api_key"
+            : serverKeyDisabled
+              ? "server_key_disabled"
             : undefined
         : undefined,
   };

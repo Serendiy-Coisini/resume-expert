@@ -33,6 +33,8 @@ function isPrivateIPv4(octets: number[]): boolean {
   if (b0 === 172 && b1 >= 16 && b1 <= 31) return true;
   // 192.168.0.0/16 (Private)
   if (b0 === 192 && b1 === 168) return true;
+  if (b0 === 192 && b1 === 0) return true;
+  if (b0 === 198 && (b1 === 18 || b1 === 19)) return true;
   // 192.0.2.0/24 (TEST-NET-1)
   if (b0 === 192 && b1 === 0 && b2 === 2) return true;
   // 198.51.100.0/24 (TEST-NET-2)
@@ -47,6 +49,9 @@ function isPrivateIPv4(octets: number[]): boolean {
 
 function isPrivateIPv6(hostname: string): boolean {
   const clean = hostname.replace(/^\[|\]$/g, "").toLowerCase();
+  // Only global unicast is accepted; mapped/transition addresses are excluded.
+  if (!/^[23][0-9a-f]{3}:/.test(clean)) return true;
+  if (clean.startsWith("2001:") || clean.startsWith("2002:")) return true;
   // IPv6 loopback
   if (clean === "::1" || clean === "0:0:0:0:0:0:0:1") return true;
   // IPv6 unspecified
@@ -110,7 +115,8 @@ export function validateAndSanitizeBaseUrl(inputUrl: string): string {
     throw new Error("Base URL 禁止包含用户名或密码");
   }
 
-  const hostname = parsed.hostname.toLowerCase();
+  const hostname = parsed.hostname.toLowerCase().replace(/\.+$/, "");
+  parsed.hostname = hostname;
 
   // 3. Check forbidden literal hostnames
   if (FORBIDDEN_HOSTNAMES.has(hostname)) {

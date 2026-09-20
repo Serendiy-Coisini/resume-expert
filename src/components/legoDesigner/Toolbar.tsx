@@ -113,6 +113,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({ isFullScreen, onToggleFullScre
   const rafThemeRef = useRef<number | null>(null);
   const [localThemeColor, setLocalThemeColor] = useState(currentThemeColor);
   const lastPreviewThemeColorRef = useRef(currentThemeColor);
+  const themeStartSchemaRef = useRef<typeof schema | null>(null);
 
   useEffect(() => {
     setLocalThemeColor(currentThemeColor);
@@ -121,6 +122,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({ isFullScreen, onToggleFullScre
 
   // High-performance real-time theme color update (throttled via RAF, saveHistory=false during drag)
   const handlePreviewThemeColor = (color: string) => {
+    if (!themeStartSchemaRef.current) themeStartSchemaRef.current = schema;
     setLocalThemeColor(color);
     lastPreviewThemeColorRef.current = color;
     if (rafThemeRef.current) {
@@ -141,8 +143,11 @@ export const Toolbar: React.FC<ToolbarProps> = ({ isFullScreen, onToggleFullScre
     const finalColor = color || lastPreviewThemeColorRef.current;
     setLocalThemeColor(finalColor);
     lastPreviewThemeColorRef.current = finalColor;
-    const updated = applyThemeColorToSchema(schema, finalColor);
+    const initialSchema = themeStartSchemaRef.current || schema;
+    const updated = applyThemeColorToSchema(initialSchema, finalColor);
+    setSchema(initialSchema, false);
     setSchema(updated, true);
+    themeStartSchemaRef.current = null;
     setTemplateOptions({ themeColor: finalColor });
     if (shouldClose) {
       setShowThemeMenu(false);
@@ -290,7 +295,6 @@ export const Toolbar: React.FC<ToolbarProps> = ({ isFullScreen, onToggleFullScre
         const parsed = JSON.parse(event.target?.result as string);
         if (parsed && typeof parsed === 'object') {
           const filledSchema = fillAiDataIntoExistingSchema(parsed, userInput, analysisResult);
-          setSelectedTemplate('custom' as TemplateId);
           setSchema(filledSchema, true);
           alert('🎉 简历排版导入成功！已自动为您载入版式并智能填入简历内容。');
         } else {

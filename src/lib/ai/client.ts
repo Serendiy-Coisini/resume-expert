@@ -1,4 +1,5 @@
 import type { ZodType } from "zod";
+import { safeAIFetch } from "@/lib/ai/safe-fetch";
 import { getAIConfig, type AIConfig } from "@/lib/ai/config";
 import { LLMError } from "@/lib/ai/errors";
 import { parseJSONFromMessage } from "@/lib/ai/parse-json";
@@ -13,6 +14,7 @@ interface ChatCompletionOptions {
   /** Optional Zod schema for runtime validation of the parsed JSON. */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   schema?: ZodType<any>;
+  signal?: AbortSignal;
 }
 
 interface ChatMessage {
@@ -74,12 +76,12 @@ async function callChatCompletions(
   config: ReturnType<typeof getAIConfig>,
   options: ChatCompletionOptions
 ) {
-  const maxRetries = 2;
+  const maxRetries = 1;
   let attempt = 0;
 
   while (attempt <= maxRetries) {
     try {
-      const response = await fetch(`${config.baseUrl}/chat/completions`, {
+      const response = await safeAIFetch(`${config.baseUrl}/chat/completions`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -95,7 +97,9 @@ async function callChatCompletions(
             { role: "user", content: options.user },
           ],
         }),
-        signal: AbortSignal.timeout(60_000),
+        signal: options.signal
+          ? AbortSignal.any([options.signal, AbortSignal.timeout(60_000)])
+          : AbortSignal.timeout(60_000),
       });
 
       if (!response.ok) {
@@ -138,6 +142,7 @@ async function callChatCompletions(
         }>;
       };
     } catch (err) {
+      if (options.signal?.aborted) throw new LLMError("请求已取消");
       if (err instanceof LLMError) {
         throw err;
       }

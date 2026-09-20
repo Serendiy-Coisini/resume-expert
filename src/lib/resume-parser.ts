@@ -87,7 +87,6 @@ export function parseResumeFromText(rawText: string): {
     }
   }
 
-  if (!name) name = '求职者';
 
   // Location Extraction (Check top 6 lines first)
   const topLinesText = rawLines.slice(0, 6).join(' ');
@@ -110,7 +109,6 @@ export function parseResumeFromText(rawText: string): {
       }
     }
   }
-  if (!location) location = '深圳';
 
   // Job Intent Extraction
   const intentMatch = text.match(/(?:求职意向|期望岗位|应聘岗位|目标岗位|求职职位|意向职位|意向|Target Role|Job Intent)[:：]\s*([^\n|]+)/i);
@@ -127,7 +125,6 @@ export function parseResumeFromText(rawText: string): {
       }
     }
   }
-  if (!jobIntent) jobIntent = '软件工程师';
 
   // 2. Education Extraction
   let school = '';
@@ -162,10 +159,6 @@ export function parseResumeFromText(rawText: string): {
     eduPeriod = eduDateMatch[1].trim();
   }
 
-  if (!school) school = '重点大学';
-  if (!degree) degree = '本科';
-  if (!major) major = '软件工程';
-  if (!eduPeriod) eduPeriod = '2023.09 - 2027.06';
 
   // 3. Classify and Extract Lines into Experience / Skills / Summary
   const dateRegex = /(\d{4}[./-]\d{1,2}\s*(?:[-–—~至到]\s*(?:\d{4}[./-]\d{1,2}|至今|现在|Present|present))|\d{4}\s*[-–—~至到]\s*\d{4}|\d{4}[./-]\d{1,2}\s*至今)/;
@@ -185,9 +178,7 @@ export function parseResumeFromText(rawText: string): {
 
   const flushCurrentExp = () => {
     if (!currentExp) return;
-    const finalBullets = currentExp.bullets.length > 0
-      ? currentExp.bullets
-      : ['负责核心业务需求推进与技术方案落地。'];
+    const finalBullets = currentExp.bullets;
 
     if (currentExp.type === 'project') {
       rawProjectItems.push({
@@ -246,7 +237,7 @@ export function parseResumeFromText(rawText: string): {
       flushCurrentExp();
 
       const dateMatch = line.match(dateRegex);
-      const period = dateMatch ? dateMatch[1].trim() : '2023.01 - 至今';
+      const period = dateMatch ? dateMatch[1].trim() : '';
       const cleanLine = line.replace(dateRegex, '').replace(/[（()）]/g, ' ').trim();
 
       let expName = '';
@@ -254,14 +245,14 @@ export function parseResumeFromText(rawText: string): {
 
       if (cleanLine.includes('·') || cleanLine.includes('|') || cleanLine.includes('——') || cleanLine.includes(' - ')) {
         const parts = cleanLine.split(/[·|—]{1,2}|\s+-\s+/).map((s) => s.trim()).filter(Boolean);
-        expName = parts[0] || '核心业务平台研发';
+        expName = parts[0] || '';
         expRole = parts[1] || jobIntent;
       } else {
-        expName = cleanLine || '核心项目研发';
+        expName = cleanLine;
       }
 
       expName = expName.replace(/^[#*•\s\d.、]+/, '').trim();
-      if (!expName) expName = '业务系统研发与重构';
+      if (!expName) continue;
 
       // Decide if it belongs to Project or Work experience
       const isProject = expName.includes('「') ||
@@ -321,71 +312,22 @@ export function parseResumeFromText(rawText: string): {
   if (summaryParagraphs.length > 0) {
     summary = summaryParagraphs.slice(0, 2).join(' ');
   }
-  if (!summary || summary.length < 15) {
-    summary = `${school} ${major} ${degree}，兼具扎实的专业技术功底与敏锐的产品/工程思维。熟练掌握 ${extractedSkills.slice(0, 4).join('、') || '需求分析与架构设计'}，具备从 0 到 1 打造高质量项目的闭环实践经验。`;
-  }
   if (summary.length > 240) {
     summary = summary.slice(0, 235) + '...';
   }
 
   // 5. Finalize Skills
-  const coreSkills: string[] = extractedSkills.length > 0
-    ? extractedSkills.slice(0, 10)
-    : ['需求分析与架构设计', 'Prompt Engineering', 'RAG 检索', 'AI 评测体系设计', '原型设计', 'MVP 验证'];
+  const coreSkills: string[] = extractedSkills.slice(0, 10);
 
   // 6. Finalize Work & Project Experience
-  let finalWork = rawWorkItems;
-  let finalProject = rawProjectItems;
-
-  if (finalWork.length === 0 && finalProject.length > 0) {
-    finalWork = finalProject.map((p) => ({
-      company: p.name,
-      role: p.role,
-      period: p.period,
-      bullets: p.bullets
-    }));
-  } else if (finalWork.length > 0 && finalProject.length === 0) {
-    finalProject = finalWork.map((w) => ({
-      name: w.company,
-      role: w.role,
-      period: w.period,
-      bullets: w.bullets
-    }));
-  }
-
-  if (finalWork.length === 0) {
-    finalWork = [
-      {
-        company: '科技创新研发项目',
-        role: jobIntent,
-        period: '2024.03 - 至今',
-        bullets: [
-          '主导核心模块架构设计与功能落地，提升业务处理效率与稳定性；',
-          '优化端到端性能，解决关键技术瓶颈，保障项目按期高质交付。'
-        ]
-      }
-    ];
-  }
-
-  if (finalProject.length === 0) {
-    finalProject = [
-      {
-        name: '智能协同系统从 0 到 1 构建',
-        role: '核心负责人',
-        period: '2024.06 - 2024.12',
-        bullets: [
-          '主导系统整体架构方案与核心链路编排，实现多端协同与高可用性能调优；',
-          '建立标准化评估基准体系，客户满意度达到 95% 以上。'
-        ]
-      }
-    ];
-  }
+  const finalWork = rawWorkItems;
+  const finalProject = rawProjectItems;
 
   const finalResume: FinalResume = {
     personalInfo: {
       name,
-      email: email || 'user@example.com',
-      phone: phone || '138-0000-0000',
+      email,
+      phone,
       location,
       avatarUrl: ''
     },
@@ -397,7 +339,7 @@ export function parseResumeFromText(rawText: string): {
     projectExperience: finalProject,
     education: {
       school,
-      degree: `${degree} · ${major}`,
+      degree: [degree, major].filter(Boolean).join(' · '),
       period: eduPeriod
     }
   };

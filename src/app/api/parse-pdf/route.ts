@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import mammoth from "mammoth";
+import { rateLimitResponse } from "@/lib/rate-limit";
 
 // Import core pdf-parse library directly to bypass pdf-parse index.js top-level readFileSync side effects
 // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -86,6 +87,12 @@ function extractTextFromBinaryDoc(buffer: Buffer): string {
 
 export async function POST(request: Request) {
   try {
+    const limited = rateLimitResponse(request, { maxRequests: 10, windowMs: 60_000 });
+    if (limited) return limited;
+    const declaredLength = Number(request.headers.get("content-length") || 0);
+    if (declaredLength > 16 * 1024 * 1024) {
+      return NextResponse.json({ error: "上传请求大小超过上限" }, { status: 413 });
+    }
     const formData = await request.formData();
     const file = formData.get("file") as File | null;
 
@@ -145,7 +152,7 @@ export async function POST(request: Request) {
         process.stdout.write = (() => true) as unknown as typeof process.stdout.write;
         process.stderr.write = (() => true) as unknown as typeof process.stderr.write;
 
-        pdfData = await pdfParse(buffer, { pagerender: renderPageSmart });
+        pdfData = await pdfParse({ data: new Uint8Array(buffer), isEvalSupported: false }, { pagerender: renderPageSmart });
       } finally {
         console.warn = originalWarn;
         console.log = originalLog;

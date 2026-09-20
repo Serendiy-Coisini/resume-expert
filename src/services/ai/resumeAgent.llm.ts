@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { chatCompletionJSON } from "@/lib/ai/client";
+import { chatCompletionJSON, LLMError } from "@/lib/ai/client";
 import type { AIConfig } from "@/lib/ai/config";
 import {
   RESUME_AGENT_SYSTEM_PROMPT,
@@ -14,17 +14,7 @@ import {
   normalizeAnalysisResult,
   normalizeFollowUpQuestions,
   normalizeOptimizedItems,
-  updateFinalResumeWithOptimizedItems,
 } from "@/lib/ai/prompts";
-import {
-  buildJDAnalysis,
-  buildDiagnosis,
-  buildMatchItems,
-  buildFollowUpQuestions,
-  buildOptimizedItems,
-  buildFinalResume,
-  buildInterviewPrep,
-} from "@/services/ai/resumeAgent.mock";
 import type { FollowUpBulletEntry } from "@/lib/ai/prompts";
 import {
   bulletResponseSchema,
@@ -41,8 +31,13 @@ type DiagnosisMatchResult = Pick<
   AnalysisResult,
   "diagnosis" | "matchItems" | "followUpQuestions"
 >;
-type OptimizeResumeResult = Pick<AnalysisResult, "optimizedItems" | "finalResume">;
+type OptimizeResumeResult = Pick<AnalysisResult, "optimizedItems" | "finalResume" | "englishResume">;
 type InterviewResult = Pick<AnalysisResult, "interviewPrep">;
+
+function shouldRetryStage(error: unknown, signal?: AbortSignal): boolean {
+  if (signal?.aborted) return false;
+  return !(error instanceof LLMError && (error.status === 401 || error.status === 403 || error.status === 429));
+}
 
 function buildCoreSummary(parts: DiagnosisMatchResult): string {
   return [
@@ -77,9 +72,10 @@ export async function runLLMResumeAnalysisStream(
   input: UserInput,
   optimizeStyle: OptimizeStyle = "ai-product",
   onStageUpdate?: (payload: StageUpdatePayload) => void,
-  config?: AIConfig
+  config?: AIConfig,
+  signal?: AbortSignal
 ): Promise<AnalysisResult> {
-  // Stage 1: JD Analysis with stage retry and local fallback
+  // Stage 1: JD analysis with one retry; propagate failures.
   onStageUpdate?.({ stage: "jd-analysis", status: "start" });
   let jdData: JDAnalysisResult["jdAnalysis"];
   try {
@@ -89,11 +85,13 @@ export async function runLLMResumeAnalysisStream(
         user: buildAnalyzeCorePrompt(input),
         maxTokens: 3000,
         schema: jdAnalysisResponseSchema,
+        signal,
       },
       config
     );
     jdData = jd.jdAnalysis;
   } catch (err) {
+    if (!shouldRetryStage(err, signal)) throw err;
     console.warn("[runLLMResumeAnalysisStream] Stage 1 (jd-analysis) failed, retrying...", err);
     try {
       const jd = await chatCompletionJSON<JDAnalysisResult>(
@@ -102,13 +100,14 @@ export async function runLLMResumeAnalysisStream(
           user: buildAnalyzeCorePrompt(input),
           maxTokens: 3000,
           schema: jdAnalysisResponseSchema,
+          signal,
         },
         config
       );
       jdData = jd.jdAnalysis;
     } catch (retryErr) {
-      console.warn("[runLLMResumeAnalysisStream] Stage 1 retry failed, degrading to local domain fallback:", retryErr);
-      jdData = buildJDAnalysis(input);
+      console.warn("[runLLMResumeAnalysisStream] JD analysis failed:", retryErr);
+      throw retryErr;
     }
   }
 
@@ -118,7 +117,7 @@ export async function runLLMResumeAnalysisStream(
     data: { jdAnalysis: jdData },
   });
 
-  // Stage 2: Diagnosis and Match with stage retry and local fallback
+  // Stage 2: Diagnosis and match with one retry; propagate failures.
   onStageUpdate?.({ stage: "diagnosis", status: "start" });
   let diagnosisMatchData: DiagnosisMatchResult;
   try {
@@ -128,10 +127,12 @@ export async function runLLMResumeAnalysisStream(
         user: buildAnalyzeDiagnosisPrompt(input),
         maxTokens: 4000,
         schema: diagnosisMatchResponseSchema,
+        signal,
       },
       config
     );
   } catch (err) {
+    if (!shouldRetryStage(err, signal)) throw err;
     console.warn("[runLLMResumeAnalysisStream] Stage 2 (diagnosis) failed, retrying...", err);
     try {
       diagnosisMatchData = await chatCompletionJSON<DiagnosisMatchResult>(
@@ -140,16 +141,13 @@ export async function runLLMResumeAnalysisStream(
           user: buildAnalyzeDiagnosisPrompt(input),
           maxTokens: 4000,
           schema: diagnosisMatchResponseSchema,
+          signal,
         },
         config
       );
     } catch (retryErr) {
-      console.warn("[runLLMResumeAnalysisStream] Stage 2 retry failed, degrading to local domain fallback:", retryErr);
-      diagnosisMatchData = {
-        diagnosis: buildDiagnosis(),
-        matchItems: buildMatchItems(),
-        followUpQuestions: buildFollowUpQuestions(),
-      };
+      console.warn("[runLLMResumeAnalysisStream] Diagnosis failed:", retryErr);
+      throw retryErr;
     }
   }
 
@@ -167,7 +165,7 @@ export async function runLLMResumeAnalysisStream(
 
   const coreSummary = buildCoreSummary(diagnosisMatchData);
 
-  // Stage 3 & 4: Run concurrently with Promise.allSettled and isolated degradation
+  // Publish each successful parallel stage even if the other stage fails.
   onStageUpdate?.({ stage: "optimize", status: "start" });
   const optimizeTask = (async (): Promise<OptimizeResumeResult> => {
     try {
@@ -177,10 +175,12 @@ export async function runLLMResumeAnalysisStream(
           user: buildAnalyzeOutputPrompt(input, optimizeStyle, coreSummary),
           maxTokens: 4500,
           schema: optimizeResumeResponseSchema,
+          signal,
         },
         config
       );
     } catch (err) {
+      if (!shouldRetryStage(err, signal)) throw err;
       console.warn("[runLLMResumeAnalysisStream] Stage 3 (optimize) failed, retrying...", err);
       try {
         return await chatCompletionJSON<OptimizeResumeResult>(
@@ -189,18 +189,13 @@ export async function runLLMResumeAnalysisStream(
             user: buildAnalyzeOutputPrompt(input, optimizeStyle, coreSummary),
             maxTokens: 4500,
             schema: optimizeResumeResponseSchema,
+            signal,
           },
           config
         );
       } catch (retryErr) {
-        console.warn("[runLLMResumeAnalysisStream] Stage 3 retry failed, degrading to local optimize fallback:", retryErr);
-        const fallbackOptimizedItems = buildOptimizedItems(optimizeStyle);
-        const baseFinalResume = buildFinalResume(input);
-        const finalResume = updateFinalResumeWithOptimizedItems(baseFinalResume, fallbackOptimizedItems);
-        return {
-          optimizedItems: fallbackOptimizedItems,
-          finalResume,
-        };
+        console.warn("[runLLMResumeAnalysisStream] Optimization failed:", retryErr);
+        throw retryErr;
       }
     }
   })();
@@ -214,10 +209,12 @@ export async function runLLMResumeAnalysisStream(
           user: buildAnalyzeInterviewPrompt(input, coreSummary),
           maxTokens: 3500,
           schema: interviewResponseSchema,
+          signal,
         },
         config
       );
     } catch (err) {
+      if (!shouldRetryStage(err, signal)) throw err;
       console.warn("[runLLMResumeAnalysisStream] Stage 4 (interview) failed, retrying...", err);
       try {
         return await chatCompletionJSON<InterviewResult>(
@@ -226,52 +223,46 @@ export async function runLLMResumeAnalysisStream(
             user: buildAnalyzeInterviewPrompt(input, coreSummary),
             maxTokens: 3500,
             schema: interviewResponseSchema,
+            signal,
           },
           config
         );
       } catch (retryErr) {
-        console.warn("[runLLMResumeAnalysisStream] Stage 4 retry failed, degrading to local interview fallback:", retryErr);
-        return {
-          interviewPrep: buildInterviewPrep(),
-        };
+        console.warn("[runLLMResumeAnalysisStream] Interview preparation failed:", retryErr);
+        throw retryErr;
       }
     }
   })();
 
-  const [optimizeSettled, interviewSettled] = await Promise.allSettled([optimizeTask, interviewTask]);
+  const [optimizeSettled, interviewSettled] = await Promise.allSettled([
+    optimizeTask.then((optimizeResume) => {
+      onStageUpdate?.({
+        stage: "optimize",
+        status: "complete",
+        data: {
+          optimizedItems: optimizeResume.optimizedItems,
+          finalResume: optimizeResume.finalResume,
+          ...(optimizeResume.englishResume ? { englishResume: optimizeResume.englishResume } : {}),
+        },
+      });
+      return optimizeResume;
+    }),
+    interviewTask.then((interview) => {
+      onStageUpdate?.({
+        stage: "interview",
+        status: "complete",
+        data: {
+          interviewPrep: interview.interviewPrep,
+        },
+      });
+      return interview;
+    }),
+  ]);
 
-  const optimizeResume: OptimizeResumeResult =
-    optimizeSettled.status === "fulfilled"
-      ? optimizeSettled.value
-      : {
-          optimizedItems: buildOptimizedItems(optimizeStyle),
-          finalResume: updateFinalResumeWithOptimizedItems(
-            buildFinalResume(input),
-            buildOptimizedItems(optimizeStyle)
-          ),
-        };
-
-  const interview: InterviewResult =
-    interviewSettled.status === "fulfilled"
-      ? interviewSettled.value
-      : { interviewPrep: buildInterviewPrep() };
-
-  onStageUpdate?.({
-    stage: "optimize",
-    status: "complete",
-    data: {
-      optimizedItems: optimizeResume.optimizedItems,
-      finalResume: optimizeResume.finalResume,
-    },
-  });
-
-  onStageUpdate?.({
-    stage: "interview",
-    status: "complete",
-    data: {
-      interviewPrep: interview.interviewPrep,
-    },
-  });
+  if (optimizeSettled.status === "rejected") throw optimizeSettled.reason;
+  if (interviewSettled.status === "rejected") throw interviewSettled.reason;
+  const optimizeResume = optimizeSettled.value;
+  const interview = interviewSettled.value;
 
   const raw: AnalysisResult = {
     jdAnalysis: jdData,
@@ -280,6 +271,7 @@ export async function runLLMResumeAnalysisStream(
     followUpQuestions: normalizedFollowUpQuestions,
     optimizedItems: optimizeResume.optimizedItems,
     finalResume: optimizeResume.finalResume,
+    englishResume: optimizeResume.englishResume,
     interviewPrep: interview.interviewPrep,
   };
 
@@ -289,7 +281,8 @@ export async function runLLMResumeAnalysisStream(
 export async function runLLMRegenerateOptimizedItems(
   input: UserInput,
   style: OptimizeStyle,
-  config?: AIConfig
+  config?: AIConfig,
+  signal?: AbortSignal
 ): Promise<{ optimizedItems: AnalysisResult["optimizedItems"] }> {
   try {
     const raw = await chatCompletionJSON<{ optimizedItems: AnalysisResult["optimizedItems"] }>(
@@ -299,13 +292,14 @@ export async function runLLMRegenerateOptimizedItems(
         temperature: 0.5,
         maxTokens: 4000,
         schema: optimizedItemsResponseSchema,
+        signal,
       },
       config
     );
     return { optimizedItems: normalizeOptimizedItems(raw.optimizedItems) };
   } catch (err) {
-    console.warn("[runLLMRegenerateOptimizedItems] LLM call failed, degrading to local domain fallback:", err);
-    return { optimizedItems: buildOptimizedItems(style) };
+    console.warn("[runLLMRegenerateOptimizedItems] LLM call failed:", err);
+    throw err;
   }
 }
 
@@ -314,7 +308,8 @@ export async function runLLMFollowUpBullet(
   question: string,
   purpose: string,
   userAnswer: string,
-  config?: AIConfig
+  config?: AIConfig,
+  signal?: AbortSignal
 ): Promise<string> {
   const raw = await chatCompletionJSON<{ bullet: string }>({
     system: RESUME_AGENT_SYSTEM_PROMPT,
@@ -322,6 +317,7 @@ export async function runLLMFollowUpBullet(
     temperature: 0.3,
     maxTokens: 500,
     schema: bulletResponseSchema,
+    signal,
   }, config);
 
   return raw.bullet?.trim() ?? "";
@@ -334,13 +330,15 @@ export async function runLLMReoptimizeWithBullets(
   input: UserInput,
   style: OptimizeStyle,
   bullets: FollowUpBulletEntry[],
-  config?: AIConfig
+  config?: AIConfig,
+  signal?: AbortSignal
 ): Promise<Pick<AnalysisResult, "optimizedItems" | "finalResume">> {
   const raw = await chatCompletionJSON<OptimizeResumeResult>({
     system: RESUME_AGENT_SYSTEM_PROMPT,
     user: buildReoptimizeWithBulletsPrompt(input, style, bullets),
     maxTokens: 5000,
     schema: optimizeResumeResponseSchema,
+    signal,
   }, config);
 
   return {
@@ -349,13 +347,14 @@ export async function runLLMReoptimizeWithBullets(
   };
 }
 
-export async function runLLMExtractTemplate(rawContent: string, config?: AIConfig): Promise<string> {
+export async function runLLMExtractTemplate(rawContent: string, config?: AIConfig, signal?: AbortSignal): Promise<string> {
   const raw = await chatCompletionJSON<{ html: string }>({
     system: RESUME_AGENT_SYSTEM_PROMPT,
     user: buildExtractTemplatePrompt(rawContent),
     temperature: 0.4,
     maxTokens: 4000,
     schema: z.object({ html: z.string() }),
+    signal,
   }, config);
 
   return raw.html?.trim() ?? "";

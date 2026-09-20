@@ -1,12 +1,21 @@
 import { NextResponse } from "next/server";
+import { safeAIFetch } from "@/lib/ai/safe-fetch";
+import { POST as recognizeImage } from "@/app/api/parse-resume-image/route";
 import mammoth from "mammoth";
 import { getAIConfig } from "@/lib/ai/config";
+import { rateLimitResponse } from "@/lib/rate-limit";
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const pdfParse = require("pdf-parse/lib/pdf-parse.js");
 
 export async function POST(request: Request) {
   try {
+    const limited = rateLimitResponse(request, { maxRequests: 8, windowMs: 60_000 });
+    if (limited) return limited;
+    const declaredLength = Number(request.headers.get("content-length") || 0);
+    if (declaredLength > 16 * 1024 * 1024) {
+      return NextResponse.json({ error: "上传请求大小超过上限" }, { status: 413 });
+    }
     const formData = await request.formData();
     const file = formData.get("file") as File | null;
 
@@ -26,6 +35,14 @@ export async function POST(request: Request) {
     const buffer = Buffer.from(arrayBuffer);
 
     if (isImage) {
+      if (request.headers.get("x-pii-mask") !== "off") {
+        const response = await recognizeImage(new Request(request.url, {
+          method: "POST", headers: { "Content-Type": "application/json", "x-ai-mode": "mock" },
+          body: JSON.stringify({ images: [`data:${file.type || "image/png"};base64,${buffer.toString("base64")}`] }),
+        }));
+        const result = await response.json();
+        return NextResponse.json({ ...result, isImage: false, fileName: file.name }, { status: response.status });
+      }
       const config = getAIConfig(request);
       const mimeType = file.type || (fileName.endsWith(".png") ? "image/png" : "image/jpeg");
       const base64DataUrl = `data:${mimeType};base64,${buffer.toString("base64")}`;
@@ -35,7 +52,7 @@ export async function POST(request: Request) {
         let lastErrorMsg = "";
 
         try {
-          const response = await fetch(`${config.baseUrl}/chat/completions`, {
+          const response = await safeAIFetch(`${config.baseUrl}/chat/completions`, {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
@@ -60,6 +77,7 @@ export async function POST(request: Request) {
                 },
               ],
             }),
+            signal: AbortSignal.any([request.signal, AbortSignal.timeout(45_000)]),
           });
 
           if (response.ok) {
@@ -101,13 +119,7 @@ export async function POST(request: Request) {
         );
       }
 
-      // Mock Mode Fallback for local dev/testing
-      return NextResponse.json({
-        text: `【AI 视觉识别提取岗位 JD】\n岗位名称：高级研发工程师 / 核心产品经理\n\n岗位职责：\n1. 负责核心产品与业务模块的前后端研发，推进项目高效交付；\n2. 参与系统架构重构与高并发高可用技术方案设计；\n3. 跨部门协同，与产品、设计团队配合提升用户体验与业务指标。\n\n任职要求：\n1. 本科及以上学历，计算机或相关专业优先；\n2. 具备扎实的基础知识与工程实践经验，熟悉主流技术栈；\n3. 具备优秀的逻辑思维能力、沟通协同能力与抗压突破能力。`,
-        isImage: true,
-        fileName: file.name,
-        dataUrl: base64DataUrl,
-      });
+      return NextResponse.json({ error: "当前模式无法识别 JD 图片，请配置视觉模型或直接粘贴文字" }, { status: 400 });
     }
 
     // Document parsing for PDF/Word/TXT
@@ -121,7 +133,7 @@ export async function POST(request: Request) {
     } else if (fileName.endsWith(".txt")) {
       text = buffer.toString("utf-8");
     } else if (fileName.endsWith(".pdf") || file.type === "application/pdf") {
-      const pdfData = await pdfParse(buffer).catch(() => null);
+      const pdfData = await pdfParse({ data: new Uint8Array(buffer), isEvalSupported: false }).catch(() => null);
       text = pdfData?.text?.trim() || "";
     }
 

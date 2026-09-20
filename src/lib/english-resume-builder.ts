@@ -4,7 +4,7 @@ import type { FinalResume, ProjectExperience, UserInput, WorkExperience } from "
  * Translates Chinese names to clean English/Pinyin format.
  */
 function translateName(name: string): string {
-  if (!name || !name.trim()) return "Alex Zhang";
+  if (!name || !name.trim()) return "";
   if (!/[\u4e00-\u9fa5]/.test(name)) return name;
 
   if (name.includes("钟小龙")) return "Xiaolong Zhong";
@@ -12,15 +12,14 @@ function translateName(name: string): string {
   if (name.includes("李华")) return "Hua Li";
   if (name.includes("王伟")) return "Wei Wang";
 
-  // Simple Romanization fallback
-  return "Xiaolong Zhong";
+  return name;
 }
 
 /**
  * Translates job roles and titles.
  */
 function translateRoleTitle(role: string): string {
-  if (!role) return "Product Manager";
+  if (!role) return "";
   if (!/[\u4e00-\u9fa5]/.test(role)) return role;
 
   let text = role;
@@ -44,14 +43,14 @@ function translateRoleTitle(role: string): string {
     .replace(/校招/g, "Campus Recruitment")
     .replace(/实习生/g, "Intern");
 
-  return text.replace(/[\u4e00-\u9fa5]+/g, "").trim() || "Product Manager";
+  return text.trim();
 }
 
 /**
  * Translates company names.
  */
 function translateCompany(company: string): string {
-  if (!company) return "Leading Technology Enterprise";
+  if (!company) return "";
   if (!/[\u4e00-\u9fa5]/.test(company)) return company;
 
   if (company.includes("科技公司")) return "Leading Tech Firm";
@@ -59,14 +58,14 @@ function translateCompany(company: string): string {
   if (company.includes("软件")) return "Enterprise Software Solutions";
   if (company.includes("互联网")) return "Top-tier Tech Giant";
 
-  return company.replace(/[某知名科技企业公司]/g, "").trim() || "Technology Enterprise";
+  return company;
 }
 
 /**
  * Translates university names.
  */
 function translateSchool(school: string): string {
-  if (!school) return "Top-tier University";
+  if (!school) return "";
   if (!/[\u4e00-\u9fa5]/.test(school)) return school;
 
   if (school.includes("北京科技大学")) return "University of Science and Technology Beijing";
@@ -76,14 +75,14 @@ function translateSchool(school: string): string {
   if (school.includes("复旦大学")) return "Fudan University";
   if (school.includes("上海交通大学")) return "Shanghai Jiao Tong University";
 
-  return school.replace(/某大学/g, "Top-tier University").replace(/[\u4e00-\u9fa5]+/g, "University").trim();
+  return school;
 }
 
 /**
  * Translates degree and major information.
  */
 function translateDegree(degree: string): string {
-  if (!degree) return "Bachelor of Science";
+  if (!degree) return "";
   if (!/[\u4e00-\u9fa5]/.test(degree)) return degree;
 
   let text = degree;
@@ -98,7 +97,7 @@ function translateDegree(degree: string): string {
     .replace(/电子信息/g, "Electronic Information")
     .replace(/人工智能/g, "Artificial Intelligence");
 
-  return text.replace(/[\u4e00-\u9fa5]+/g, "").replace(/\|\s*\|/g, "|").trim();
+  return text.trim();
 }
 
 /**
@@ -107,11 +106,11 @@ function translateDegree(degree: string): string {
 function translateJobIntent(intent: string, userInput?: UserInput): string {
   if (userInput?.targetRole) {
     const roleEn = translateRoleTitle(userInput.targetRole);
-    const indEn = userInput.industry ? translateTextToEnglish(userInput.industry) : "Enterprise Tech";
-    return `${roleEn} | ${indEn}`;
+    const indEn = userInput.industry ? translateTextToEnglish(userInput.industry) : "";
+    return [roleEn, indEn].filter(Boolean).join(" | ");
   }
 
-  if (!intent) return "AI Product Manager | Enterprise SaaS";
+  if (!intent) return "";
   if (!/[\u4e00-\u9fa5]/.test(intent)) return intent;
 
   return translateTextToEnglish(intent);
@@ -215,9 +214,8 @@ export function translateTextToEnglish(text: string): string {
     .replace(/跨国团队/g, "cross-border international teams ")
     .replace(/至今/g, "Present");
 
-  // Remove leftover Chinese characters safely
-  s = s.replace(/[\u4e00-\u9fa5]+/g, " ");
-  return s.replace(/\s+/g, " ").trim();
+  const normalized = s.replace(/\s+/g, " ").trim();
+  return /[\u4e00-\u9fa5]/.test(normalized) ? `[Translation needed] ${normalized}` : normalized;
 }
 
 /**
@@ -233,8 +231,7 @@ export function getOrBuildEnglishResume(
   const englishName = translateName(p.name);
   const englishJobIntent = translateJobIntent(finalResume.jobIntent, userInput);
 
-  const englishSummary = translateTextToEnglish(finalResume.summary) ||
-    "Results-oriented AI Product Manager with experience in Enterprise AI, RAG architecture, and data-driven product iteration. Proven track record of delivering end-to-end AI copilot features and optimizing LLM retrieval pipelines.";
+  const englishSummary = translateTextToEnglish(finalResume.summary);
 
   const englishCoreSkills = (finalResume.coreSkills && finalResume.coreSkills.length > 0)
     ? finalResume.coreSkills.map(skill => {
@@ -243,24 +240,19 @@ export function getOrBuildEnglishResume(
         }
         return skill;
       }).filter(Boolean)
-    : [
-        "LLM Application Design (Prompt Engineering, Agent Workflows, RAG)",
-        "B2B Client Scenario Analysis & Requirements Delivery",
-        "Data-Driven Product Iteration & A/B Testing",
-        "Cross-Functional Collaboration & Technical Documentation",
-      ];
+    : [];
 
   const englishWorkExp: WorkExperience[] = (finalResume.workExperience || []).map((exp) => ({
     company: translateCompany(exp.company),
     role: translateRoleTitle(exp.role),
-    period: exp.period ? exp.period.replace(/至今/g, "Present") : "2023.03 - Present",
+    period: exp.period ? exp.period.replace(/至今/g, "Present") : "",
     bullets: (exp.bullets || []).map(b => translateTextToEnglish(b)).filter(Boolean),
   }));
 
   const englishProjExp: ProjectExperience[] = (finalResume.projectExperience || []).map((proj) => ({
-    name: translateTextToEnglish(proj.name) || "AI Intelligent Document Copilot",
+    name: translateTextToEnglish(proj.name),
     role: translateRoleTitle(proj.role),
-    period: proj.period || "2023.09 - 2024.01",
+    period: proj.period || "",
     bullets: (proj.bullets || []).map(b => translateTextToEnglish(b)).filter(Boolean),
   }));
 
@@ -274,15 +266,15 @@ export function getOrBuildEnglishResume(
   const englishEdu = {
     school: translateSchool(finalResume.education?.school || ""),
     degree: translateDegree(finalResume.education?.degree || ""),
-    period: finalResume.education?.period || "2017.09 - 2021.06",
+    period: finalResume.education?.period || "",
   };
 
   return {
     personalInfo: {
       name: englishName,
-      email: p.email || "zhangming_demo@example.com",
-      phone: p.phone || "138-0013-8000",
-      location: p.location ? (p.location.includes("北京") ? "Beijing, China" : (p.location.includes("上海") ? "Shanghai, China" : "China")) : "Beijing, China",
+      email: p.email,
+      phone: p.phone,
+      location: p.location ? (p.location.includes("北京") ? "Beijing, China" : (p.location.includes("上海") ? "Shanghai, China" : p.location)) : "",
       avatarUrl: p.avatarUrl,
     },
     jobIntent: englishJobIntent,

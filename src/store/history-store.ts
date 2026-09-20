@@ -1,11 +1,12 @@
 import { create } from "zustand";
-import { persist } from "zustand/middleware";
+import { createJSONStorage, persist } from "zustand/middleware";
 import type {
   AnalysisResult,
   OptimizeStyle,
   StepId,
   UserInput,
 } from "@/types/resume";
+import { safeBrowserStorage } from "@/lib/safe-storage";
 
 const MAX_SESSIONS = 20;
 
@@ -47,6 +48,7 @@ export const useHistoryStore = create<HistoryStore>()(
     {
       name: "resume-expert-history",
       version: 1,
+      storage: createJSONStorage(() => safeBrowserStorage),
     }
   )
 );

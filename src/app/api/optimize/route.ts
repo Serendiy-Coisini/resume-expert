@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { getAIConfig } from "@/lib/ai/config";
 import { LLMError } from "@/lib/ai/client";
 import { checkRateLimit } from "@/lib/rate-limit";
-import type { OptimizeRequestBody } from "@/lib/ai/types";
+import { optimizeRequestSchema, parseJSONBody, RequestValidationError } from "@/lib/ai/request-validation";
 import { regenerateOptimizedItemsServer } from "@/services/ai/resumeAgent.server";
 
 export async function POST(request: Request) {
@@ -22,7 +22,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const body = (await request.json()) as OptimizeRequestBody;
+    const body = await parseJSONBody(request, optimizeRequestSchema);
     const { input, style } = body;
 
     if (!input?.originalResume?.trim() || !style) {
@@ -30,9 +30,13 @@ export async function POST(request: Request) {
     }
 
     const config = getAIConfig(request);
-    const { optimizedItems, finalResume, mode } = await regenerateOptimizedItemsServer(input, style, config);
+    const signal = AbortSignal.any([request.signal, AbortSignal.timeout(75_000)]);
+    const { optimizedItems, finalResume, mode } = await regenerateOptimizedItemsServer(input, style, config, signal);
     return NextResponse.json({ optimizedItems, finalResume, mode });
   } catch (error) {
+    if (error instanceof RequestValidationError) {
+      return NextResponse.json({ error: error.message }, { status: error.status });
+    }
     const message = error instanceof LLMError ? error.message : "优化生成失败，请稍后重试";
     return NextResponse.json({ error: message }, { status: 500 });
   }

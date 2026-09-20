@@ -1,4 +1,5 @@
 import { clsx, type ClassValue } from "clsx";
+import { sanitizePrintHTML } from "@/lib/safe-html";
 import { twMerge } from "tailwind-merge";
 import { renderTemplateHTML, getPageMarginValues, type TemplateId } from "./resume-templates";
 
@@ -198,7 +199,6 @@ export function exportResumeAsPDF(
 
   const printScript = `
     <script>
-      document.title = "${docTitle}";
       window.addEventListener('load', function() {
         var imgs = document.getElementsByTagName('img');
         var promises = [];
@@ -219,9 +219,7 @@ export function exportResumeAsPDF(
     </script>
   `;
 
-  const contentWithPrint = htmlContent
-    .replace("<title>", `<title>${docTitle}</title><style>`)
-    .replace("</head>", `${printStyle}</head>`)
+  const contentWithPrint = sanitizePrintHTML(htmlContent.replace("</head>", `${printStyle}</head>`))
     .replace("</body>", `${printScript}</body>`);
 
   printWindow.document.write(contentWithPrint);

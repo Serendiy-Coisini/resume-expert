@@ -5,8 +5,9 @@ import type {
   OptimizeResponseBody,
 } from "@/lib/ai/types";
 import type { AnalysisResult, OptimizeStyle, UserInput } from "@/types/resume";
-import { anonymizeUserInput, restoreAnalysisResult } from "@/lib/privacy/pii";
-import { getAIHeaders, getUserAIConfig } from "@/store/ai-config-store";
+import { anonymizePayload, restoreAnalysisResult } from "@/lib/privacy/pii";
+import { useResumeStore } from "@/store/resume-store";
+import { getAIHeaders, getUserAIConfig, useAIConfigStore } from "@/store/ai-config-store";
 
 export { STYLE_LABELS } from "@/lib/ai/types";
 
@@ -20,6 +21,7 @@ class ResumeAgentClientError extends Error {
 async function postJSON<T>(url: string, body: unknown, signal?: AbortSignal): Promise<T> {
   const effectiveSignal = signal ?? AbortSignal.timeout(60_000);
   const aiHeaders = getAIHeaders();
+  const { value: safeBody, piiMap } = anonymizePayload(body, useResumeStore.getState().enablePIIMasking);
 
   let response: Response;
   try {
@@ -29,7 +31,7 @@ async function postJSON<T>(url: string, body: unknown, signal?: AbortSignal): Pr
         "Content-Type": "application/json",
         ...aiHeaders,
       },
-      body: JSON.stringify(body),
+      body: JSON.stringify(safeBody),
       signal: effectiveSignal,
     });
   } catch (error) {
@@ -51,10 +53,11 @@ async function postJSON<T>(url: string, body: unknown, signal?: AbortSignal): Pr
     throw new ResumeAgentClientError(data.error || `请求失败 (${response.status})`);
   }
 
-  return data;
+  return restoreAnalysisResult(data, piiMap);
 }
 
 export async function fetchAIStatus() {
+  if (useAIConfigStore.getState().forceMock) return { mode: "mock" as const };
   const userConfig = getUserAIConfig();
   if (userConfig?.apiKey) {
     return {
@@ -72,7 +75,7 @@ export async function fetchAIStatus() {
     mode: "mock" | "llm";
     model?: string;
     provider?: string;
-    reason?: "missing_api_key" | "forced";
+    reason?: "missing_api_key" | "forced" | "server_key_disabled";
   }>;
 }
 
@@ -99,13 +102,7 @@ export async function runResumeAnalysisStream(
 ): Promise<AnalysisResult> {
   const { enablePIIMasking = true, onStageChange, onPartialResult } = callbacks;
 
-  let inputToSend = input;
-  let piiMap = new Map<string, string>();
-  if (enablePIIMasking) {
-    const anonymized = anonymizeUserInput(input);
-    inputToSend = anonymized.anonymizedInput;
-    piiMap = anonymized.piiMap;
-  }
+  const { value: inputToSend, piiMap } = anonymizePayload(input, enablePIIMasking);
 
   const effectiveSignal = signal ?? AbortSignal.timeout(90_000);
   const aiHeaders = getAIHeaders();
@@ -187,6 +184,8 @@ export async function runResumeAnalysisStream(
     throw new ResumeAgentClientError("未收到完整分析结果");
   }
 
+  if (finalResult.finalResume?.personalInfo) finalResult.finalResume.personalInfo.avatarUrl = input.avatarUrl;
+  if (finalResult.englishResume?.personalInfo) finalResult.englishResume.personalInfo.avatarUrl = input.avatarUrl;
   return finalResult;
 }
 

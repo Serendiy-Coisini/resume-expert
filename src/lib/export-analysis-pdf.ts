@@ -1,4 +1,5 @@
 import type { AnalysisResult, JDAnalysis, InterviewPrep, UserInput } from "@/types/resume";
+import { sanitizePrintHTML } from "@/lib/safe-html";
 
 function buildCommonHeader(title: string, subtitle: string, userInput?: UserInput): string {
   const role = userInput?.targetRole || "目标岗位";
@@ -470,7 +471,6 @@ function getCommonStyles(): string {
 function openPrintWindow(htmlContent: string, documentTitle: string) {
   const script = `
     <script>
-      document.title = "${documentTitle}";
       window.addEventListener('load', function() {
         setTimeout(function() {
           window.print();
@@ -479,7 +479,10 @@ function openPrintWindow(htmlContent: string, documentTitle: string) {
     </script>
   `;
 
-  const fullHtml = htmlContent.replace("</body>", `${script}</body>`);
+  // Set the title as text before sanitization, never interpolate it into JavaScript.
+  const escapedTitle = documentTitle.replace(/[&<>"']/g, (char) => `&#${char.charCodeAt(0)};`);
+  const safeHtml = sanitizePrintHTML(htmlContent.replace(/<title>[\s\S]*?<\/title>/i, `<title>${escapedTitle}</title>`));
+  const fullHtml = safeHtml.replace("</body>", `${script}</body>`);
   const blob = new Blob([fullHtml], { type: "text/html;charset=utf-8" });
   const blobUrl = URL.createObjectURL(blob);
   const printWindow = window.open(blobUrl, "_blank");

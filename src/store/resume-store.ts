@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { persist } from "zustand/middleware";
+import { createJSONStorage, persist } from "zustand/middleware";
 import type {
   AnalysisResult,
   OptimizeStyle,
@@ -10,12 +10,17 @@ import type {
 import type { AIMode } from "@/lib/ai/types";
 import { DEFAULT_CUSTOM_TEMPLATE_HTML } from "@/lib/resume-templates";
 import { useHistoryStore, type HistorySession } from "@/store/history-store";
+import { safeBrowserStorage } from "@/lib/safe-storage";
 
 function createSessionId(): string {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
     return crypto.randomUUID();
   }
   return `session-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function revokeBlobUrl(url?: string) {
+  if (typeof URL !== "undefined" && url?.startsWith("blob:")) URL.revokeObjectURL(url);
 }
 
 const STEPS: StepId[] = [
@@ -45,6 +50,7 @@ interface ResumeStore {
   analysisStage: AnalysisStageInfo | null;
   enablePIIMasking: boolean;
   analysisResult: AnalysisResult | null;
+  partialAnalysisResult: Partial<AnalysisResult> | null;
   analysisError: string | null;
   aiMode: AIMode | null;
   optimizeStyle: OptimizeStyle;
@@ -55,17 +61,19 @@ interface ResumeStore {
   copied: boolean;
   maxReachedStepIndex: number;
   sessionId: string;
+  inputRevision: number;
 
   setUserInput: (input: Partial<UserInput>) => void;
   setEnablePIIMasking: (enabled: boolean) => void;
   setAnalysisStage: (stage: AnalysisStageInfo | null) => void;
   updatePartialAnalysisResult: (partial: Partial<AnalysisResult>) => void;
-  setTemplateOptions: (options: import("@/lib/resume-templates").TemplateOptions) => void;
+  setTemplateOptions: (options: Partial<import("@/lib/resume-templates").TemplateOptions>) => void;
   setShowPageBreakGuide: (show: boolean) => void;
   loadExampleData: () => void;
   setCurrentStep: (step: StepId) => void;
   setAnalyzing: (analyzing: boolean) => void;
   setAnalysisResult: (result: AnalysisResult) => void;
+  patchAnalysisResult: (patch: Partial<AnalysisResult>, expectedSessionId?: string) => void;
   setAnalysisError: (error: string | null) => void;
   setAiMode: (mode: AIMode | null) => void;
   setOptimizeStyle: (style: OptimizeStyle) => void;
@@ -103,13 +111,17 @@ function archiveIfAvailable(state: ArchivableState) {
   if (!analysisResult || !userInput.jobDescription.trim()) return;
   const safeUserInput = { ...userInput };
   delete safeUserInput.rawFileDataUrl;
+  delete safeUserInput.avatarUrl;
+  const safeAnalysisResult: AnalysisResult = JSON.parse(JSON.stringify(analysisResult));
+  if (safeAnalysisResult.finalResume?.personalInfo) delete safeAnalysisResult.finalResume.personalInfo.avatarUrl;
+  if (safeAnalysisResult.englishResume?.personalInfo) delete safeAnalysisResult.englishResume.personalInfo.avatarUrl;
   useHistoryStore.getState().saveSession({
     id: state.sessionId,
     createdAt: Date.now(),
     targetRole: userInput.targetRole,
     jdExcerpt: userInput.jobDescription.replace(/\s+/g, " ").trim().slice(0, 80),
     userInput: safeUserInput as typeof userInput,
-    analysisResult,
+    analysisResult: safeAnalysisResult,
     currentStep: state.currentStep,
     maxReachedStepIndex: state.maxReachedStepIndex,
     optimizeStyle: state.optimizeStyle,
@@ -125,6 +137,7 @@ export const useResumeStore = create<ResumeStore>()(
       analysisStage: null,
       enablePIIMasking: true,
       analysisResult: null,
+      partialAnalysisResult: null,
       analysisError: null,
       aiMode: null,
       optimizeStyle: "concise" as OptimizeStyle,
@@ -141,11 +154,38 @@ export const useResumeStore = create<ResumeStore>()(
       copied: false,
       maxReachedStepIndex: 0,
       sessionId: createSessionId(),
+      inputRevision: 0,
 
       setUserInput: (input) =>
-        set((state) => ({
-          userInput: { ...state.userInput, ...input },
-        })),
+        set((state) => {
+          if ("rawFileDataUrl" in input && input.rawFileDataUrl !== state.userInput.rawFileDataUrl) {
+            revokeBlobUrl(state.userInput.rawFileDataUrl);
+          }
+          const analysisFields: Array<keyof UserInput> = [
+            "targetRole", "industry", "companyType", "jobStage", "highlightSkills",
+            "jobDescription", "originalResume", "additionalInfo",
+          ];
+          const materialChange = analysisFields.some(
+            (key) => key in input && input[key] !== state.userInput[key]
+          );
+          if (materialChange && state.analysisResult) archiveIfAvailable(state);
+          return {
+            userInput: { ...state.userInput, ...input },
+            ...(materialChange
+              ? {
+                  inputRevision: state.inputRevision + 1,
+                  analysisResult: null,
+                  partialAnalysisResult: null,
+                  analysisError: null,
+                  isAnalyzing: false,
+                  analysisStage: null,
+                  currentStep: "input" as StepId,
+                  maxReachedStepIndex: 0,
+                  sessionId: createSessionId(),
+                }
+              : {}),
+          };
+        }),
 
       setEnablePIIMasking: (enabled) => set({ enablePIIMasking: enabled }),
 
@@ -153,16 +193,16 @@ export const useResumeStore = create<ResumeStore>()(
 
       updatePartialAnalysisResult: (partial) =>
         set((state) => ({
-          analysisResult: state.analysisResult
-            ? { ...state.analysisResult, ...partial }
-            : (partial as AnalysisResult),
+          partialAnalysisResult: { ...(state.partialAnalysisResult ?? {}), ...partial },
         })),
 
-      setTemplateOptions: (options) => set({ templateOptions: options }),
+      setTemplateOptions: (options) =>
+        set((state) => ({ templateOptions: { ...state.templateOptions, ...options } })),
 
       setShowPageBreakGuide: (show) => set({ showPageBreakGuide: show }),
 
-      loadExampleData: () =>
+      loadExampleData: () => {
+        revokeBlobUrl(get().userInput.rawFileDataUrl);
         set({
           userInput: {
             targetRole: "AI 产品经理",
@@ -221,7 +261,8 @@ Axure · Figma · Python (数据分析) · SQL · Prompt Optimization · LangCha
 北京科技大学 · 本科 · 计算机科学与技术 · 2017.09 - 2021.06`,
             additionalInfo: "希望突出在 AI 功能落地、架构设计和数据驱动优化方面的丰富经验与项目成果。",
           },
-        }),
+        });
+      },
 
       setCurrentStep: (step) => {
         const idx = STEPS.indexOf(step);
@@ -239,13 +280,20 @@ Axure · Figma · Python (数据分析) · SQL · Prompt Optimization · LangCha
               isAnalyzing: analyzing,
               maxReachedStepIndex: 0,
               analysisResult: null,
+              partialAnalysisResult: null,
               sessionId: createSessionId(),
             };
           }
           return { isAnalyzing: analyzing };
         }),
 
-      setAnalysisResult: (result) => set({ analysisResult: result, analysisError: null }),
+      setAnalysisResult: (result) => set({ analysisResult: result, partialAnalysisResult: null, analysisError: null }),
+
+      patchAnalysisResult: (patch, expectedSessionId) =>
+        set((state) => {
+          if (!state.analysisResult || (expectedSessionId && state.sessionId !== expectedSessionId)) return state;
+          return { analysisResult: { ...state.analysisResult, ...patch } };
+        }),
 
       setAnalysisError: (error) => set({ analysisError: error }),
 
@@ -264,7 +312,7 @@ Axure · Figma · Python (数据分析) · SQL · Prompt Optimization · LangCha
             analysisResult: {
               ...state.analysisResult,
               followUpQuestions: state.analysisResult.followUpQuestions.map((q) =>
-                q.id === id ? { ...q, userAnswer: answer } : q
+                q.id === id ? { ...q, userAnswer: answer, generatedBullet: "" } : q
               ),
             },
           };
@@ -312,10 +360,13 @@ Axure · Figma · Python (数据分析) · SQL · Prompt Optimization · LangCha
 
       restoreFromHistory: (session) => {
         archiveIfAvailable(get());
+        revokeBlobUrl(get().userInput.rawFileDataUrl);
         set({
           sessionId: session.id,
+          inputRevision: get().inputRevision + 1,
           userInput: session.userInput,
           analysisResult: session.analysisResult,
+          partialAnalysisResult: null,
           currentStep: session.currentStep,
           maxReachedStepIndex: session.maxReachedStepIndex,
           optimizeStyle: session.optimizeStyle,
@@ -327,12 +378,14 @@ Axure · Figma · Python (数据分析) · SQL · Prompt Optimization · LangCha
 
       reset: () => {
         archiveIfAvailable(get());
+        revokeBlobUrl(get().userInput.rawFileDataUrl);
         set({
           userInput: defaultUserInput,
           currentStep: "input" as StepId,
           isAnalyzing: false,
           analysisStage: null,
           analysisResult: null,
+          partialAnalysisResult: null,
           analysisError: null,
           optimizeStyle: "concise" as OptimizeStyle,
           selectedTemplate: "classic" as import("@/types/resume").TemplateId,
@@ -340,6 +393,7 @@ Axure · Figma · Python (数据分析) · SQL · Prompt Optimization · LangCha
           copied: false,
           maxReachedStepIndex: 0,
           sessionId: createSessionId(),
+          inputRevision: get().inputRevision + 1,
         });
       },
 
@@ -364,16 +418,24 @@ Axure · Figma · Python (数据分析) · SQL · Prompt Optimization · LangCha
     {
       name: "resume-expert-store",
       version: 1,
+      storage: createJSONStorage(() => safeBrowserStorage),
       partialize: (state) => {
         const safeUserInput = { ...(state.userInput || {}) };
         delete safeUserInput.rawFileDataUrl;
+        delete safeUserInput.avatarUrl;
+        const safeAnalysisResult = state.analysisResult
+          ? JSON.parse(JSON.stringify(state.analysisResult)) as AnalysisResult
+          : null;
+        if (safeAnalysisResult?.finalResume?.personalInfo) delete safeAnalysisResult.finalResume.personalInfo.avatarUrl;
+        if (safeAnalysisResult?.englishResume?.personalInfo) delete safeAnalysisResult.englishResume.personalInfo.avatarUrl;
         return {
           userInput: safeUserInput as typeof state.userInput,
           currentStep: state.currentStep,
-          analysisResult: state.analysisResult,
+          analysisResult: safeAnalysisResult,
           optimizeStyle: state.optimizeStyle,
           maxReachedStepIndex: state.maxReachedStepIndex,
           sessionId: state.sessionId,
+          inputRevision: state.inputRevision,
         };
       },
     }

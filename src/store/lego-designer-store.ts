@@ -377,18 +377,25 @@ export const useLegoDesignerStore = create<LegoDesignerState>((set, get) => {
     batchMoveWidgets: (widgetIds, deltaX, deltaY, initialPositions, saveHistory = true) => {
       const { schema } = get();
       const historyUpdate = saveHistory ? saveStateToHistory(schema) : {};
-      const newSchema = deepClone(schema);
-
-      for (const page of newSchema.componentsTree) {
-        if (!page.children) continue;
-        for (const widget of page.children) {
-          if (widgetIds.includes(widget.id) && initialPositions[widget.id]) {
+      const targets = new Set(widgetIds);
+      const newSchema = {
+        ...schema,
+        componentsTree: schema.componentsTree.map((page) => ({
+          ...page,
+          children: page.children?.map((widget) => {
             const initPos = initialPositions[widget.id];
-            widget.css.left = Math.max(0, Math.round(initPos.left + deltaX));
-            widget.css.top = Math.max(0, Math.round(initPos.top + deltaY));
-          }
-        }
-      }
+            if (!targets.has(widget.id) || !initPos) return widget;
+            return {
+              ...widget,
+              css: {
+                ...widget.css,
+                left: Math.max(0, Math.round(initPos.left + deltaX)),
+                top: Math.max(0, Math.round(initPos.top + deltaY)),
+              },
+            };
+          }),
+        })),
+      };
 
       set({ schema: newSchema, ...historyUpdate });
     },
@@ -505,15 +512,20 @@ export const useLegoDesignerStore = create<LegoDesignerState>((set, get) => {
     updateWidgetCss: (widgetId, cssUpdate, saveHistory = true) => {
       const { schema } = get();
       const historyUpdate = saveHistory ? saveStateToHistory(schema) : {};
-      const newSchema = deepClone(schema);
-
-      for (const page of newSchema.componentsTree) {
-        const widget = page.children?.find((item) => item.id === widgetId);
-        if (widget) {
-          widget.css = { ...widget.css, ...cssUpdate };
-          break;
-        }
-      }
+      const newSchema = {
+        ...schema,
+        componentsTree: schema.componentsTree.map((page) => {
+          if (!page.children?.some((item) => item.id === widgetId)) return page;
+          return {
+            ...page,
+            children: page.children.map((widget) =>
+              widget.id === widgetId
+                ? { ...widget, css: { ...widget.css, ...cssUpdate } }
+                : widget
+            ),
+          };
+        }),
+      };
 
       set({ schema: newSchema, ...historyUpdate });
     },

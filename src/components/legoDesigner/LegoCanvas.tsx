@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useLegoDesignerStore } from '@/store/lego-designer-store';
+import { useShallow } from 'zustand/react/shallow';
 import { WidgetRenderer } from './widgets/WidgetRenderer';
 import type { IWidget } from '@/types/lego';
 import { Layers, Copy, Trash2, ArrowUp, ArrowDown, Maximize, Maximize2, Minimize2, Sparkles } from 'lucide-react';
@@ -40,7 +41,27 @@ export const LegoCanvas: React.FC<LegoCanvasProps> = ({ isFullScreen, onToggleFu
     redo,
     alignWidgets,
     setSchema
-  } = useLegoDesignerStore();
+  } = useLegoDesignerStore(useShallow((state) => ({
+    schema: state.schema,
+    selectedWidgetIds: state.selectedWidgetIds,
+    scale: state.scale,
+    isFormatPainterActive: state.isFormatPainterActive,
+    setSelectedWidgetId: state.setSelectedWidgetId,
+    setSelectedWidgetIds: state.setSelectedWidgetIds,
+    toggleWidgetSelection: state.toggleWidgetSelection,
+    applyCopiedStyle: state.applyCopiedStyle,
+    updateWidgetCss: state.updateWidgetCss,
+    batchMoveWidgets: state.batchMoveWidgets,
+    batchDeleteWidgets: state.batchDeleteWidgets,
+    deleteWidget: state.deleteWidget,
+    duplicateWidget: state.duplicateWidget,
+    moveWidgetLayer: state.moveWidgetLayer,
+    pushHistoryState: state.pushHistoryState,
+    undo: state.undo,
+    redo: state.redo,
+    alignWidgets: state.alignWidgets,
+    setSchema: state.setSchema,
+  })));
 
   const [contextMenu, setContextMenu] = useState<{
     visible: boolean;

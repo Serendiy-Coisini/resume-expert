@@ -1,7 +1,7 @@
 import { getAIConfig } from "@/lib/ai/config";
 import { LLMError } from "@/lib/ai/client";
 import { checkRateLimit } from "@/lib/rate-limit";
-import type { AnalyzeRequestBody } from "@/lib/ai/types";
+import { analyzeRequestSchema, parseJSONBody, RequestValidationError } from "@/lib/ai/request-validation";
 import { runMockResumeAnalysisStream } from "@/services/ai/resumeAgent.mock";
 import { runLLMResumeAnalysisStream } from "@/services/ai/resumeAgent.llm";
 import type { AnalysisResult } from "@/types/resume";
@@ -26,7 +26,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const body = (await request.json()) as AnalyzeRequestBody;
+    const body = await parseJSONBody(request, analyzeRequestSchema);
     const { input, optimizeStyle = "ai-product" } = body;
 
     if (!input?.targetRole?.trim() || !input?.jobDescription?.trim() || !input?.originalResume?.trim()) {
@@ -38,11 +38,21 @@ export async function POST(request: Request) {
 
     const config = getAIConfig(request);
     const mode = config.mode;
+    const analysisSignal = AbortSignal.any([request.signal, AbortSignal.timeout(90_000)]);
     const encoder = new TextEncoder();
 
     const stream = new ReadableStream({
       async start(controller) {
+        let closed = false;
+        const close = () => {
+          if (!closed) {
+            closed = true;
+            controller.close();
+          }
+        };
+        request.signal.addEventListener("abort", close, { once: true });
         const sendEvent = (event: string, data: unknown) => {
+          if (closed || request.signal.aborted) return;
           controller.enqueue(encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`));
         };
 
@@ -58,7 +68,7 @@ export async function POST(request: Request) {
           let finalResult: AnalysisResult;
 
           if (mode === "llm") {
-            finalResult = await runLLMResumeAnalysisStream(input, optimizeStyle, onStageUpdate, config);
+            finalResult = await runLLMResumeAnalysisStream(input, optimizeStyle, onStageUpdate, config, analysisSignal);
           } else {
             finalResult = await runMockResumeAnalysisStream(input, optimizeStyle, onStageUpdate);
           }
@@ -73,7 +83,7 @@ export async function POST(request: Request) {
                 : "分析失败，请稍后重试";
           sendEvent("error", { error: message });
         } finally {
-          controller.close();
+          close();
         }
       },
     });
@@ -86,9 +96,10 @@ export async function POST(request: Request) {
       },
     });
   } catch (error) {
+    const status = error instanceof RequestValidationError ? error.status : 500;
     const message = error instanceof Error ? error.message : "请求失败";
     return new Response(JSON.stringify({ error: message }), {
-      status: 500,
+      status,
       headers: { "Content-Type": "application/json" },
     });
   }

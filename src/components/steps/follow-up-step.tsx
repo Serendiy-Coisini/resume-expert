@@ -18,10 +18,11 @@ export function FollowUpStep() {
     optimizeStyle,
     updateFollowUpAnswer,
     setFollowUpBullet,
-    setAnalysisResult,
+    patchAnalysisResult,
     setCurrentStep,
+    sessionId,
   } = useResumeStore();
-  const [loadingId, setLoadingId] = useState<string | null>(null);
+  const [loadingIds, setLoadingIds] = useState<Set<string>>(new Set());
   const [applying, setApplying] = useState(false);
   const [applied, setApplied] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -40,14 +41,16 @@ export function FollowUpStep() {
   const { followUpQuestions } = analysisResult;
 
   const generatedBullets = followUpQuestions
-    .filter((q) => (q.generatedBullet || q.presetBullet || "").trim())
-    .map((q) => ({ purpose: q.purpose, bullet: q.generatedBullet || q.presetBullet || "" }));
+    .filter((q) => q.userAnswer.trim() && q.generatedBullet.trim())
+    .map((q) => ({ purpose: q.purpose, bullet: q.generatedBullet }));
 
   const handleGenerateBullet = async (id: string) => {
     const question = followUpQuestions.find((q) => q.id === id);
     if (!question || !(question.userAnswer || "").trim()) return;
 
-    setLoadingId(id);
+    const startedSessionId = sessionId;
+    const startedAnswer = question.userAnswer;
+    setLoadingIds((current) => new Set(current).add(id));
     setError(null);
     setApplied(false);
     try {
@@ -57,18 +60,27 @@ export function FollowUpStep() {
         question.purpose,
         question.userAnswer
       );
-      setFollowUpBullet(id, bullet);
-      setCustomGeneratedIds((prev) => new Set(prev).add(id));
+      const current = useResumeStore.getState();
+      const currentQuestion = current.analysisResult?.followUpQuestions.find((item) => item.id === id);
+      if (current.sessionId === startedSessionId && currentQuestion?.userAnswer === startedAnswer) {
+        setFollowUpBullet(id, bullet);
+        setCustomGeneratedIds((prev) => new Set(prev).add(id));
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Bullet 生成失败");
     } finally {
-      setLoadingId(null);
+      setLoadingIds((current) => {
+        const next = new Set(current);
+        next.delete(id);
+        return next;
+      });
     }
   };
 
   const handleApplyBullets = async () => {
     if (!generatedBullets.length) return;
     setApplying(true);
+    const startedSessionId = sessionId;
     setError(null);
     try {
       const { optimizedItems, finalResume } = await applyFollowUpBullets(
@@ -76,12 +88,12 @@ export function FollowUpStep() {
         optimizeStyle,
         generatedBullets
       );
-      setAnalysisResult({
-        ...analysisResult,
+      patchAnalysisResult({
         optimizedItems,
         finalResume,
-      });
-      setApplied(true);
+        englishResume: undefined,
+      }, startedSessionId);
+      if (useResumeStore.getState().sessionId === startedSessionId) setApplied(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : "应用追问结果失败");
     } finally {
@@ -178,11 +190,11 @@ export function FollowUpStep() {
                   <Button
                     variant="default"
                     size="sm"
-                    disabled={!q.userAnswer.trim() || loadingId === q.id}
+                    disabled={!q.userAnswer.trim() || loadingIds.has(q.id)}
                     onClick={() => handleGenerateBullet(q.id)}
                     className="bg-blue-600 hover:bg-blue-700 text-white font-medium text-xs"
                   >
-                    {loadingId === q.id ? (
+                    {loadingIds.has(q.id) ? (
                       <>
                         <Loader2 className="h-3.5 w-3.5 animate-spin" />
                         正在根据您的回答定制生成...
@@ -241,7 +253,7 @@ export function FollowUpStep() {
                 已可应用 {generatedBullets.length} 条 bullet 补强履历
               </p>
               <p className="text-xs text-blue-700">
-                点击应用后，包含预设范例与专属定制的 Bullet 将全量融进后续简历优化与成品导出中
+                仅会应用您填写真实回答后生成的专属 Bullet
               </p>
             </div>
             <Button

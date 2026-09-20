@@ -55,7 +55,7 @@ export function TemplateSelector({ onImportToLego }: TemplateSelectorProps = {})
         if (!res.ok) throw new Error(data.error || "解析 PDF 样本失败");
         content = data.text;
       } else if (file.type.startsWith("image/")) {
-        content = `简历图片样本: ${file.name}`;
+        throw new Error("当前模板提取仅支持含文本的 PDF、HTML 或文本文件，暂不支持从图片还原布局");
       } else {
         content = await file.text();
       }
@@ -75,7 +75,7 @@ export function TemplateSelector({ onImportToLego }: TemplateSelectorProps = {})
         if (cleanHTML) {
           setCustomTemplateHTML(cleanHTML);
           setSelectedTemplate("custom");
-          setSuccessMsg("🎉 成功根据您上传的文件精准识别并生成专属 HTML/CSS 布局模板！已自动应用。");
+          setSuccessMsg("🎉 已根据上传文件的文本结构生成相似 HTML/CSS 模板并自动应用。");
           setTimeout(() => setSuccessMsg(null), 6000);
         } else {
           throw new Error("AI 未能识别出有效的 HTML 模板结构，请确认文件格式");
@@ -207,7 +207,7 @@ export function TemplateSelector({ onImportToLego }: TemplateSelectorProps = {})
               </div>
 
               <p className="mb-2 text-[10.5px] text-purple-900/70 line-clamp-2 leading-snug">
-                上传 PDF/图片/HTML，AI 智能提炼 HTML 模板
+                上传 PDF/HTML/文本，AI 根据文本结构生成相似模板
               </p>
             </div>
 
@@ -215,7 +215,7 @@ export function TemplateSelector({ onImportToLego }: TemplateSelectorProps = {})
               <input
                 ref={fileInputRef}
                 type="file"
-                accept=".pdf,.png,.jpg,.jpeg,.html"
+                accept=".pdf,.html,.htm,.txt"
                 className="hidden"
                 onChange={handleTemplateFileUpload}
               />
@@ -236,7 +236,7 @@ export function TemplateSelector({ onImportToLego }: TemplateSelectorProps = {})
                 ) : (
                   <>
                     <Sparkles className="h-3 w-3 text-purple-600" />
-                    上传 PDF/图片
+                    上传 PDF/HTML/文本
                   </>
                 )}
               </button>

@@ -35,7 +35,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { SectionTitle } from "@/components/shared/ui-helpers";
 import { runResumeAnalysisStream } from "@/services/ai/resumeAgent";
 import { useResumeStore } from "@/store/resume-store";
-import { getAIHeaders } from "@/store/ai-config-store";
+import { getAIHeaders, useAIConfigStore } from "@/store/ai-config-store";
 import { renderPdfPagesToImages } from "@/lib/pdf-to-images";
 import type { CompanyType, JobStage } from "@/types/resume";
 import { COMPANY_TYPE_OPTIONS, getCompanyTypeOption } from "@/lib/company-config";
@@ -320,7 +320,9 @@ export function InputStep() {
           extractedText = data.text;
         } else if (data.isScannedPdf || !data.text || data.text.trim().length < 20) {
           // Vector/Scanned PDF fallback -> render pages to images and run Vision/OCR
-          const pageImages = await renderPdfPagesToImages(file, 4);
+          const pageImages = await renderPdfPagesToImages(file, 4, (total) => {
+            setPdfError(`该 PDF 共 ${total} 页，当前 OCR 最多处理前 4 页；请确认后续页面没有关键经历。`);
+          });
           if (!pageImages || pageImages.length === 0) {
             throw new Error("未能从 PDF 中提取出有效页面图像");
           }
@@ -435,6 +437,12 @@ export function InputStep() {
       completedStages: [],
     });
 
+    const analysisTask = useResumeStore.getState();
+    const isCurrentTask = () => {
+      const current = useResumeStore.getState();
+      return current.sessionId === analysisTask.sessionId && current.inputRevision === analysisTask.inputRevision;
+    };
+
     try {
       const result = await runResumeAnalysisStream(
         userInput,
@@ -442,6 +450,7 @@ export function InputStep() {
         {
           enablePIIMasking,
           onStageChange: (stageId, status) => {
+            if (!isCurrentTask()) return;
             const stepIdx = STAGE_STEPS.findIndex((s) => s.id === stageId);
             const stepInfo = STAGE_STEPS[stepIdx];
 
@@ -469,12 +478,13 @@ export function InputStep() {
             }
           },
           onPartialResult: (partial) => {
-            updatePartialAnalysisResult(partial);
+            if (isCurrentTask()) updatePartialAnalysisResult(partial);
           },
         },
         controller.signal
       );
 
+      if (!isCurrentTask()) return;
       setAnalysisResult(result);
       setAnalysisStage({
         stageId: "complete",
@@ -489,11 +499,15 @@ export function InputStep() {
       setCurrentStep("jd-analysis");
     } catch (error) {
       if (error instanceof DOMException && error.name === "AbortError") return;
-      setAnalysisError(error instanceof Error ? error.message : "分析失败，请稍后重试");
+      if (isCurrentTask()) {
+        setAnalysisError(error instanceof Error ? error.message : "分析失败，请稍后重试");
+      }
     } finally {
       abortControllerRef.current = null;
-      setAnalyzing(false);
-      setAnalysisStage(null);
+      if (isCurrentTask()) {
+        setAnalyzing(false);
+        setAnalysisStage(null);
+      }
     }
   };
 
@@ -521,7 +535,7 @@ export function InputStep() {
           <div>
             <span className="font-semibold text-emerald-950">AI 敏感隐私脱敏保护</span>
             <span className="ml-2 text-emerald-700">
-              开启后，手机号、电子邮箱、姓名等个人隐私将在发送给 AI 前自动加密脱敏，分析完成后自动原位解密还原。
+              开启后，识别到的手机号、邮箱及姓名会替换为占位符，图片使用本地 OCR。自动识别可能遗漏，请检查材料；关闭后图片和原始文本可能发送至所选模型服务商。
             </span>
           </div>
         </div>
@@ -561,7 +575,7 @@ export function InputStep() {
                   variant="outline"
                   onClick={async () => {
                     try {
-                      await fetch("/api/settings", { method: "DELETE" });
+                      useAIConfigStore.getState().resetConfig();
                       setAiMode("mock");
                       setAnalysisError(null);
                     } catch {
