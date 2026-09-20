@@ -6,6 +6,7 @@ import { printLegoCanvas } from './utils/printLego';
 import { SaveTemplateDialog } from './SaveTemplateDialog';
 import { ImportResumeDialog } from './ImportResumeDialog';
 import { PhotoManagerDialog } from './PhotoManagerDialog';
+import { saveLegoDraft, loadLegoDraft } from '@/lib/lego-draft';
 import { applyThemeColorToSchema, THEME_COLOR_PRESETS, hslToHex, hexToHsl } from '@/lib/theme-utils';
 import type { TemplateId } from '@/types/resume';
 import {
@@ -56,7 +57,8 @@ export const Toolbar: React.FC<ToolbarProps> = ({ isFullScreen, onToggleFullScre
     isFormatPainterActive,
     toggleFormatPainter
   } = useLegoDesignerStore();
-  const { userInput, analysisResult, templateOptions, setTemplateOptions, customTemplateHTML, setSelectedTemplate } = useResumeStore();
+  const { userInput, analysisResult, partialAnalysisResult, templateOptions, setTemplateOptions, customTemplateHTML, setSelectedTemplate } = useResumeStore();
+  const effectiveAnalysisResult = analysisResult || partialAnalysisResult;
 
   const handleClearCanvas = () => {
     if (confirm('确定要清空画布上的所有内容吗？\n\n温馨提示：清空后已添加的所有积木模块将被移除。若有重要排版，建议先点击【暂时保存】备份草稿。')) {
@@ -83,10 +85,8 @@ export const Toolbar: React.FC<ToolbarProps> = ({ isFullScreen, onToggleFullScre
   const [draftTime, setDraftTime] = useState<string | null>(null);
 
   useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const savedTime = localStorage.getItem('legoDesignerDraftTime');
-      if (savedTime) setDraftTime(savedTime);
-    }
+    const { savedTime } = loadLegoDraft();
+    if (savedTime) setDraftTime(savedTime);
   }, []);
 
   const currentThemeColor = (schema?.css as Record<string, unknown>)?.themeColor as string || templateOptions.themeColor || '#1e3a8a';
@@ -205,7 +205,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({ isFullScreen, onToggleFullScre
       setSelectedTemplate(targetTemplateId);
       const freshSchema = buildLegoSchemaFromResume(
         userInput,
-        analysisResult,
+        effectiveAnalysisResult,
         targetTemplateId,
         templateOptions,
         customTemplateHTML
@@ -230,10 +230,9 @@ export const Toolbar: React.FC<ToolbarProps> = ({ isFullScreen, onToggleFullScre
   };
 
   const handleSaveDraft = useCallback(() => {
-    try {
-      localStorage.setItem('legoDesignerDraft', JSON.stringify(schema));
-      const nowStr = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
-      localStorage.setItem('legoDesignerDraftTime', nowStr);
+    const result = saveLegoDraft(schema);
+    if (result.success && result.savedTime) {
+      const nowStr = result.savedTime;
       setDraftTime(nowStr);
       setJustSaved(true);
       setTimeout(() => setJustSaved(false), 2000);
@@ -248,29 +247,29 @@ export const Toolbar: React.FC<ToolbarProps> = ({ isFullScreen, onToggleFullScre
         </div>
       );
       setTimeout(() => setSavedToast(null), 4500);
-    } catch {
+    } else {
       alert('草稿保存失败：浏览器本地存储空间不足，建议您通过“保存为模板”进行备份。');
     }
   }, [schema]);
 
   const handleLoadDraft = () => {
-    const saved = localStorage.getItem('legoDesignerDraft');
-    const savedTime = localStorage.getItem('legoDesignerDraftTime');
-    if (!saved) {
-      alert('未找到本地草稿记录。您可以在编辑过程中随时点击【暂时保存】记录进度哦~');
+    const { schema: parsed, savedTime, exists, corrupted } = loadLegoDraft();
+    if (!parsed) {
+      if (corrupted) {
+        alert('草稿读取失败：数据格式不兼容或已受损，请重试或重新保存');
+      } else if (!exists) {
+        alert('未找到本地草稿记录。您可以在编辑过程中随时点击【暂时保存】记录进度哦~');
+      } else {
+        alert('草稿读取失败：未找到有效草稿内容');
+      }
       return;
     }
-    try {
-      const parsed = JSON.parse(saved);
-      const timeInfo = savedTime ? `（保存于 ${savedTime}）` : '';
-      if (confirm(`确定要载入上次保存的草稿${timeInfo}吗？\n\n温馨提示：载入后将覆盖当前画布上未保存的修改，请确认是否继续。`)) {
-        setSchema(parsed, true);
-        setDraftHintToast(null);
-        setSavedToast('✨ 已成功恢复草稿，您可以继续编辑啦！');
-        setTimeout(() => setSavedToast(null), 3000);
-      }
-    } catch {
-      alert('草稿读取失败：数据格式不兼容或已受损，请重试或重新保存');
+    const timeInfo = savedTime ? `（保存于 ${savedTime}）` : '';
+    if (confirm(`确定要载入上次保存的草稿${timeInfo}吗？\n\n温馨提示：载入后将覆盖当前画布上未保存的修改，请确认是否继续。`)) {
+      setSchema(parsed, true);
+      setDraftHintToast(null);
+      setSavedToast('✨ 已成功恢复草稿，您可以继续编辑啦！');
+      setTimeout(() => setSavedToast(null), 3000);
     }
   };
 
@@ -816,8 +815,9 @@ export const Toolbar: React.FC<ToolbarProps> = ({ isFullScreen, onToggleFullScre
                 : 'bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white border-slate-700 hover:border-slate-600'
             }`}
             onClick={() => {
-              if (!showMoreMenu && typeof window !== 'undefined') {
-                setDraftTime(localStorage.getItem('legoDesignerDraftTime'));
+              if (!showMoreMenu) {
+                const { savedTime } = loadLegoDraft();
+                setDraftTime(savedTime);
               }
               setShowMoreMenu(!showMoreMenu);
             }}

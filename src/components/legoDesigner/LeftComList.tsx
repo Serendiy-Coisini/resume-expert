@@ -56,7 +56,7 @@ export const LeftComList: React.FC<LeftComListProps> = ({
     deleteSavedTemplate,
     loadSavedTemplates
   } = useLegoDesignerStore();
-  const { userInput } = useResumeStore();
+  const userInput = useResumeStore((s) => s.userInput);
 
   useEffect(() => {
     loadSavedTemplates();

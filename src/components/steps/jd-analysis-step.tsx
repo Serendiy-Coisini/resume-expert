@@ -24,9 +24,18 @@ import { getCompanyTypeOption } from "@/lib/company-config";
 import { getJobStageOption } from "@/lib/job-stage-config";
 
 export function JDAnalysisStep() {
-  const { userInput, analysisResult, setCurrentStep } = useResumeStore(useShallow((state) => ({ userInput: state.userInput, analysisResult: state.analysisResult, setCurrentStep: state.setCurrentStep })));
+  const { userInput, analysisResult, partialAnalysisResult, setCurrentStep } = useResumeStore(
+    useShallow((state) => ({
+      userInput: state.userInput,
+      analysisResult: state.analysisResult,
+      partialAnalysisResult: state.partialAnalysisResult,
+      setCurrentStep: state.setCurrentStep,
+    }))
+  );
 
-  if (!analysisResult || !analysisResult.jdAnalysis) {
+  const effectiveResult = analysisResult || partialAnalysisResult;
+
+  if (!effectiveResult || !effectiveResult.jdAnalysis) {
     return (
       <EmptyState
         message="请先完成输入材料并开始分析"
@@ -36,7 +45,7 @@ export function JDAnalysisStep() {
     );
   }
 
-  const { jdAnalysis } = analysisResult;
+  const { jdAnalysis } = effectiveResult;
   const companyOpt = getCompanyTypeOption(userInput.companyType);
   const stageOpt = getJobStageOption(userInput.jobStage);
 
@@ -62,7 +71,8 @@ export function JDAnalysisStep() {
           <Button
             variant="outline"
             size="sm"
-            onClick={() => exportFullAnalysisAsPDF(userInput, analysisResult)}
+            disabled={!analysisResult}
+            onClick={() => analysisResult && exportFullAnalysisAsPDF(userInput, analysisResult)}
             className="text-xs text-indigo-700 border-indigo-200 bg-indigo-50/60 hover:bg-indigo-100 font-medium"
           >
             <Printer className="h-3.5 w-3.5 mr-1 text-indigo-600" />

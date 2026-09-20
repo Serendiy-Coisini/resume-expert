@@ -42,7 +42,7 @@
 - 🔒 **Privacy-First 隐私安全**
   - 开启隐私保护后，自动替换识别到的姓名、联系方式、公司、地址等信息，并提供发送预览。规则可能遗漏或误判，请人工核对；图片由本应用服务器 OCR 处理。页面配置的 API Key 仅持久化在当前浏览器，调用时经本应用服务端内存转发给所选模型服务商，不写入服务端磁盘。
 - 📄 **ATS 友好与多格式导出**
-  - 支持导出文字可复制的 **PDF**、便于继续编辑的 **Word (.docx)** 内容版及 **纯文本格式**；实际 ATS 解析效果取决于模板和招聘系统。
+  - 支持导出文字可复制的 **PDF**、便于二次编辑的结构化 **Word (.docx)** 内容版及 **纯文本格式**（注：Word 导出为标准结构化版式，非积木绝对坐标层完全映射）；实际 ATS 解析效果取决于模板和招聘系统。
 
 ---
 
@@ -79,7 +79,7 @@
 - **框架与构建**：Next.js 15 (App Router), React 19, TypeScript
 - **样式与 UI**：Tailwind CSS, shadcn/ui, Lucide Icons
 - **状态管理**：Zustand (支持持久化与历史撤销重做)
-- **文档生成与导出**：jsPDF / html2canvas, docx.js
+- **文档生成与导出**：html2canvas, 原生打印 / 矢量 PDF, docx.js (结构化内容版)
 - **AI 架构**：服务端 OpenAI 兼容 HTTP 适配层（支持 Server-Sent Events 流式输出）
 
 ---
@@ -183,18 +183,19 @@ resume-expert/
 │   │   │   ├── analyze/         # 简历诊断分析接口 (流式 SSE)
 │   │   │   ├── follow-up/       # 启发式追问与参考 Bullet 生成
 │   │   │   ├── parse-pdf/       # PDF/文档解析
-│   │   │   └── settings/        # AI 配置保存、回显与重置
+│   │   │   └── settings/        # 服务端环境配置状态检验与连通性测试 (客户端持久化，服务端无状态代理)
 │   │   ├── designer/            # 积木排版设计器主页面
 │   │   ├── expert/              # 简历诊断优化主流程
 │   │   └── settings/            # AI 大模型设置页面
 │   ├── components/
 │   │   ├── legoDesigner/        # 积木排版设计器核心组件 (画布、图层、属性面板)
 │   │   ├── shared/              # 共享 UI 组件 (模板选择器、对照卡片等)
-│   │   ├── steps/               # 诊断流程 7 大步骤视图组件
+│   │   ├── steps/               # 诊断流程 8 大步骤视图组件 (输入/JD分析/诊断/匹配度/追问/重构/模板/导出)
 │   │   └── ui/                  # 基础 UI 库组件 (Button, Dialog, Input 等)
 │   ├── lib/
 │   │   ├── ai/                  # AI Prompt 模版、数据 Schema 与解析工具
 │   │   ├── lego-adapter.ts      # 履历数据 -> 积木 Schema 转换与精确折行高度引擎
+│   │   ├── lego-draft.ts        # 积木设计器本地草稿统一存储与时间戳同步
 │   │   └── utils.ts             # 辅助工具函数
 │   ├── services/ai/             # AI 服务调度层 (Mock / LLM 引擎分发)
 │   ├── store/                   # Zustand 全局状态 (简历数据、积木画布 Store)

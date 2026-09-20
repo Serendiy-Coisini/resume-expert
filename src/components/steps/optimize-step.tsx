@@ -32,19 +32,22 @@ const STYLE_OPTIONS: { value: OptimizeStyle; label: string; desc: string }[] = [
 export function OptimizeStep() {
   const {
     analysisResult,
+    partialAnalysisResult,
     userInput,
     optimizeStyle,
     setOptimizeStyle,
     patchAnalysisResult,
     setCurrentStep,
     sessionId,
-  } = useResumeStore(useShallow((state) => ({ analysisResult: state.analysisResult, userInput: state.userInput, optimizeStyle: state.optimizeStyle, setOptimizeStyle: state.setOptimizeStyle, patchAnalysisResult: state.patchAnalysisResult, setCurrentStep: state.setCurrentStep, sessionId: state.sessionId })));
+  } = useResumeStore(useShallow((state) => ({ analysisResult: state.analysisResult, partialAnalysisResult: state.partialAnalysisResult, userInput: state.userInput, optimizeStyle: state.optimizeStyle, setOptimizeStyle: state.setOptimizeStyle, patchAnalysisResult: state.patchAnalysisResult, setCurrentStep: state.setCurrentStep, sessionId: state.sessionId })));
   const taskRef = useRef<AbortController | null>(null);
   useEffect(() => () => taskRef.current?.abort(), []);
   const [regenerating, setRegenerating] = useState(false);
   const [optimizeError, setOptimizeError] = useState<string | null>(null);
 
-  if (!analysisResult || !analysisResult.optimizedItems) {
+  const effectiveResult = analysisResult || partialAnalysisResult;
+
+  if (!effectiveResult || !effectiveResult.optimizedItems) {
     return (
       <EmptyState
         message="请先完成输入材料并开始分析"
@@ -63,14 +66,16 @@ export function OptimizeStep() {
     setRegenerating(true);
     setOptimizeError(null);
     try {
-      const additionalInfo = [userInput.additionalInfo, ...analysisResult.followUpQuestions.filter(q => q.userAnswer.trim()).map(q => `${q.purpose}：${q.userAnswer}`)].join("\n");
+      const currentQuestions = (analysisResult || partialAnalysisResult)?.followUpQuestions || [];
+      const additionalInfo = [userInput.additionalInfo, ...currentQuestions.filter((q: import("@/types/resume").FollowUpQuestion) => q.userAnswer.trim()).map((q: import("@/types/resume").FollowUpQuestion) => `${q.purpose}：${q.userAnswer}`)].join("\n");
       if (additionalInfo.length > 10_000) throw new Error("补充信息合计超过 10000 字，请精简后再切换风格，以免遗漏已确认的事实。");
       const { optimizedItems: items, finalResume: newFinalResume } = await regenerateOptimizedItems({ ...userInput, additionalInfo }, style, task.signal);
-      const currentResult = useResumeStore.getState().analysisResult;
+      const currentResult = useResumeStore.getState().analysisResult || useResumeStore.getState().partialAnalysisResult;
       if (useResumeStore.getState().sessionId !== startedSessionId || !currentResult) return;
+      const avatarUrl = currentResult.finalResume?.personalInfo?.avatarUrl || userInput.avatarUrl;
       const committed = patchAnalysisResult({
         optimizedItems: items,
-        finalResume: { ...newFinalResume, personalInfo: { ...newFinalResume.personalInfo, avatarUrl: currentResult.finalResume.personalInfo.avatarUrl } },
+        finalResume: { ...newFinalResume, personalInfo: { ...newFinalResume.personalInfo, avatarUrl } },
         englishResume: undefined,
       }, startedSessionId, revision);
       if (committed) setOptimizeStyle(style);
@@ -83,7 +88,7 @@ export function OptimizeStep() {
     }
   };
 
-  const { optimizedItems } = analysisResult;
+  const { optimizedItems } = effectiveResult;
 
   return (
     <div>
@@ -145,7 +150,7 @@ export function OptimizeStep() {
 
       {/* Mobile Card List View (hidden on sm+) */}
       <div className="block sm:hidden space-y-3 mb-6">
-        {optimizedItems.map((item) => (
+        {optimizedItems.map((item: import("@/types/resume").OptimizedItem) => (
           <Card key={item.id} className="p-3.5 space-y-2.5">
             <div className="flex items-center justify-between border-b border-neutral-100 pb-2">
               <span className="text-xs font-bold text-blue-900 bg-blue-50 px-2 py-0.5 rounded border border-blue-200/60">
@@ -195,7 +200,7 @@ export function OptimizeStep() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {optimizedItems.map((item) => (
+              {optimizedItems.map((item: import("@/types/resume").OptimizedItem) => (
                 <TableRow key={item.id}>
                   <TableCell className="font-medium">{item.section}</TableCell>
                   <TableCell className="text-neutral-500">{item.before}</TableCell>

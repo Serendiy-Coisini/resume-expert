@@ -64,6 +64,9 @@ export function anonymizePayload<T>(input: T, enabled = true): { value: T; piiMa
   return { value: visit(input) as T, piiMap };
 }
 
+/**
+ * @deprecated 建议直接使用支持泛型任意负载与脱敏开关控制的 `anonymizePayload`。
+ */
 export function anonymizeUserInput(input: UserInput): PIIAnonymizeResult {
   const { value, piiMap } = anonymizePayload(input);
   return { anonymizedInput: value, piiMap };

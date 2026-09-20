@@ -6,16 +6,17 @@ import { ArrowLeft, Save, FileText, FileUp } from "lucide-react";
 import { LegoDesigner } from "@/components/legoDesigner";
 import { ImportResumeDialog } from "@/components/legoDesigner/ImportResumeDialog";
 import { useLegoDesignerStore } from "@/store/lego-designer-store";
+import { saveLegoDraft } from "@/lib/lego-draft";
 
 export default function DesignerPage() {
   const [importDialogOpen, setImportDialogOpen] = useState(false);
   const { schema } = useLegoDesignerStore();
 
   const handleSaveDraft = () => {
-    try {
-      localStorage.setItem("legoDesignerDraft", JSON.stringify(schema));
-      alert("🎉 草稿已成功保存到浏览器本地存储！");
-    } catch {
+    const result = saveLegoDraft(schema);
+    if (result.success) {
+      alert(`🎉 草稿已成功保存到浏览器本地存储！(${result.savedTime})`);
+    } else {
       alert("草稿保存失败，浏览器存储空间可能已满");
     }
   };

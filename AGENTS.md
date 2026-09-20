@@ -12,7 +12,7 @@
 - **JD 深度对齐与人岗缺口量化**：深度拆解岗位 JD 硬性条件与隐性职责，生成精准匹配度诊断与缺口报告。
 - **启发式追问与 STAR 重构**：智能识别量化空白，提供大模型预设参考 Bullet，引导求职者补全量化成果并重构高说服力履历。
 - **前后无损双栏对比**：原始简历 vs AI 优化简历同屏双栏对照，改动点与提升理由清晰可见。
-- **积木排版设计器 (Lego Designer)**：多模板自适应排版、拖拽排序、精确动态高度折行计算，支持高保真矢量 PDF 与 Word (.docx) 导出。
+- **积木排版设计器 (Lego Designer)**：多模板自适应排版、拖拽排序、精确动态高度折行计算，支持高保真矢量 PDF 导出与便于二次内容编辑的结构化 Word (.docx) 导出。
 - **安全 BYOK 架构与零门槛 Mock 双模**：支持 DeepSeek、SiliconFlow、OpenAI、Kimi 等服务商，未配置 Key 时自动运行高保真 Mock 演示模式。
 
 ---
@@ -28,7 +28,7 @@
   - 双模分发层：真实 LLM 实时调用 + 离线高保真 Mock 数据模式
 - **Document & PDF Processing**:
   - 导入解析：`pdfjs-dist`, `pdf-parse`, `mammoth` (Docx), `tesseract.js` (OCR 图片文字识别)
-  - 导出渲染：`docx`, `jspdf`, `html2canvas`
+  - 导出渲染：`docx` (结构化内容版), `html2canvas` (预览截图), 矢量打印导出 (`jspdf` 仅用于开发单测环境校验)
 - **Subproject**: `resume-design-main` (基于 Vite + Vue 3 的简历设计器扩展模块)
 - **Package Manager**: `npm` (主工程使用 npm，子模块 `resume-design-main` 使用 pnpm)
 
@@ -49,8 +49,8 @@ resume-expert/
 │   │   │   ├── parse-resume-image/  # 简历图片 OCR 解析
 │   │   │   ├── parse-jd-image/      # JD 岗位图片 OCR 解析
 │   │   │   ├── extract-template/    # 模板结构化提取
-│   │   │   └── settings/            # AI 配置检验、保存与读取
-│   │   ├── expert/                  # 简历诊断与重构主流程页面 (包含 7 步指引)
+│   │   │   └── settings/            # 服务端环境配置状态检验与连通性测试 (客户端持久化，服务端无状态代理)
+│   │   ├── expert/                  # 简历诊断与重构主流程页面 (包含 8 步核心指引)
 │   │   ├── designer/                # 积木排版设计器主页面
 │   │   ├── settings/                # 大模型参数与 BYOK 配置页面
 │   │   ├── privacy/                 # 隐私政策页面
@@ -59,7 +59,7 @@ resume-expert/
 │   │   ├── page.tsx                 # 首页 Landing Page
 │   │   └── globals.css              # 全局样式与 Tailwind 基础指令
 │   ├── components/                  # UI 组件
-│   │   ├── steps/                   # 简历诊断流程核心 7 大步骤组件 (Step 1 ~ Step 7)
+│   │   ├── steps/                   # 简历诊断流程核心 8 大步骤组件 (Step 1 ~ Step 8: 输入、JD分析、诊断、匹配度、追问、重构对比、模板选择、导出排版)
 │   │   ├── legoDesigner/            # 积木排版设计器 (画布渲染、图层树、属性设置器、高度引擎)
 │   │   ├── shared/                  # 跨流程业务共享组件 (双栏对比卡片、模板选择器等)
 │   │   ├── ui/                      # 基础原子 UI 库 (Button, Dialog, Select, Tabs, Tooltip 等)
@@ -68,7 +68,8 @@ resume-expert/
 │   ├── lib/                         # 核心算法、转换工具与工具函数
 │   │   ├── lego-adapter.ts          # 履历数据 -> 积木 Schema 转换引擎与精确折行高度计算
 │   │   ├── industry-detector.ts     # 行业与职位智能识别算法
-│   │   ├── docx-exporter.ts         # Word (.docx) 文档生成导出
+│   │   ├── docx-exporter.ts         # 结构化简历内容 Word (.docx) 文档生成导出 (便于二次编辑)
+│   │   ├── lego-draft.ts            # 积木设计器本地草稿统一存储与时间戳同步
 │   │   ├── export-analysis-pdf.ts   # 诊断分析报告 PDF 导出
 │   │   ├── resume-templates.ts      # 预设排版模板配置
 │   │   ├── preset-resumes.ts        # 预设范例简历数据

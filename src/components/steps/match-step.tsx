@@ -18,9 +18,18 @@ import { useResumeStore } from "@/store/resume-store";
 import { exportFullAnalysisAsPDF } from "@/lib/export-analysis-pdf";
 
 export function MatchStep() {
-  const { userInput, analysisResult, setCurrentStep } = useResumeStore(useShallow((state) => ({ userInput: state.userInput, analysisResult: state.analysisResult, setCurrentStep: state.setCurrentStep })));
+  const { userInput, analysisResult, partialAnalysisResult, setCurrentStep } = useResumeStore(
+    useShallow((state) => ({
+      userInput: state.userInput,
+      analysisResult: state.analysisResult,
+      partialAnalysisResult: state.partialAnalysisResult,
+      setCurrentStep: state.setCurrentStep,
+    }))
+  );
 
-  if (!analysisResult || !analysisResult.matchItems) {
+  const effectiveResult = analysisResult || partialAnalysisResult;
+
+  if (!effectiveResult || !effectiveResult.matchItems) {
     return (
       <EmptyState
         message="请先完成输入材料并开始分析"
@@ -30,7 +39,7 @@ export function MatchStep() {
     );
   }
 
-  const { matchItems } = analysisResult;
+  const { matchItems } = effectiveResult;
 
   return (
     <div>
@@ -44,7 +53,8 @@ export function MatchStep() {
         <Button
           variant="outline"
           size="sm"
-          onClick={() => exportFullAnalysisAsPDF(userInput, analysisResult)}
+          disabled={!analysisResult}
+          onClick={() => analysisResult && exportFullAnalysisAsPDF(userInput, analysisResult)}
           className="text-xs text-indigo-700 border-indigo-200 bg-indigo-50/60 hover:bg-indigo-100 font-medium"
         >
           <Printer className="h-3.5 w-3.5 mr-1 text-indigo-600" />

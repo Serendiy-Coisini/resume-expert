@@ -236,7 +236,9 @@ export const RightSetter: React.FC<RightSetterProps> = ({
     batchUpdateWidgetCss,
     updatePagePadding
   } = useLegoDesignerStore();
-  const { setUserInput, templateOptions, setTemplateOptions } = useResumeStore();
+  const setUserInput = useResumeStore((s) => s.setUserInput);
+  const templateOptions = useResumeStore((s) => s.templateOptions);
+  const setTemplateOptions = useResumeStore((s) => s.setTemplateOptions);
   const [photoDialogOpen, setPhotoDialogOpen] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);

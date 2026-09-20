@@ -23,14 +23,16 @@ export const LegoDesigner: React.FC<LegoDesignerProps> = ({
   const { schema, setSchema, setScale, sourceKey } = useLegoDesignerStore(useShallow((state) => ({
     schema: state.schema, setSchema: state.setSchema, setScale: state.setScale, sourceKey: state.sourceKey,
   })));
-  const { userInput, analysisResult, selectedTemplate, templateOptions, customTemplateHTML } = useResumeStore(useShallow((state) => ({
+  const { userInput, analysisResult, partialAnalysisResult, selectedTemplate, templateOptions, customTemplateHTML } = useResumeStore(useShallow((state) => ({
     userInput: state.userInput,
     analysisResult: state.analysisResult,
+    partialAnalysisResult: state.partialAnalysisResult,
     selectedTemplate: state.selectedTemplate,
     templateOptions: state.templateOptions,
     customTemplateHTML: state.customTemplateHTML,
     sessionId: state.sessionId,
   })));
+  const effectiveAnalysisResult = analysisResult || partialAnalysisResult;
 
   const [internalFullScreen, setInternalFullScreen] = useState(false);
   const isFullScreen = propIsFullScreen !== undefined ? propIsFullScreen : internalFullScreen;
@@ -68,7 +70,7 @@ export const LegoDesigner: React.FC<LegoDesignerProps> = ({
     if (currentChildren.length === 0 || isTemplateChanged) {
       const initialSchema = buildLegoSchemaFromResume(
         userInput,
-        analysisResult,
+        effectiveAnalysisResult,
         selectedTemplate,
         templateOptions,
         customTemplateHTML
@@ -173,7 +175,7 @@ export const LegoDesigner: React.FC<LegoDesignerProps> = ({
             setTimeout(() => URL.revokeObjectURL(url), 1000);
           }}>下载原画布备份</button>
           <button className="rounded bg-indigo-600 text-white px-4 py-2" onClick={() => {
-            setSchema(buildLegoSchemaFromResume(userInput, analysisResult, selectedTemplate, templateOptions, customTemplateHTML), true);
+            setSchema(buildLegoSchemaFromResume(userInput, effectiveAnalysisResult, selectedTemplate, templateOptions, customTemplateHTML), true);
           }}>同步当前简历</button>
         </div>
       ) : <>

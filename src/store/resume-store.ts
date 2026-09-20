@@ -11,6 +11,7 @@ import type { AIMode } from "@/lib/ai/types";
 import { DEFAULT_CUSTOM_TEMPLATE_HTML } from "@/lib/resume-templates";
 import { useHistoryStore, type HistorySession } from "@/store/history-store";
 import { safeBrowserStorage } from "@/lib/safe-storage";
+import { completeAnalysisResultSchema } from "@/lib/ai/schemas";
 
 function createSessionId(): string {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
@@ -21,6 +22,11 @@ function createSessionId(): string {
 
 function revokeBlobUrl(url?: string) {
   if (typeof URL !== "undefined" && url?.startsWith("blob:")) URL.revokeObjectURL(url);
+}
+
+export function isCompleteAnalysisResult(result: unknown): result is AnalysisResult {
+  if (!result || typeof result !== "object") return false;
+  return completeAnalysisResultSchema.safeParse(result).success;
 }
 
 const STEPS: StepId[] = [
@@ -294,9 +300,16 @@ Axure · Figma · Python (数据分析) · SQL · Prompt Optimization · LangCha
 
       patchAnalysisResult: (patch, expectedSessionId, expectedRevision) => {
         const state = get();
-        if (!state.analysisResult || (expectedSessionId && state.sessionId !== expectedSessionId) ||
+        const base = state.analysisResult || state.partialAnalysisResult;
+        if (!base || (expectedSessionId && state.sessionId !== expectedSessionId) ||
             (expectedRevision !== undefined && state.resultRevision !== expectedRevision)) return false;
-        set({ analysisResult: { ...state.analysisResult, ...patch }, resultRevision: state.resultRevision + 1 });
+        const updated = { ...base, ...patch };
+        const isComplete = isCompleteAnalysisResult(updated);
+        set({
+          analysisResult: isComplete ? (updated as AnalysisResult) : null,
+          partialAnalysisResult: isComplete ? null : (updated as Partial<AnalysisResult>),
+          resultRevision: state.resultRevision + 1,
+        });
         return true;
       },
 
@@ -312,34 +325,42 @@ Axure · Figma · Python (数据分析) · SQL · Prompt Optimization · LangCha
 
       updateFollowUpAnswer: (id, answer) =>
         set((state) => {
-          if (!state.analysisResult) return state;
+          const target = state.analysisResult || state.partialAnalysisResult;
+          if (!target || !target.followUpQuestions) return state;
+          const updated = target.followUpQuestions.map((q) =>
+            q.id === id ? { ...q, userAnswer: answer, generatedBullet: "" } : q
+          );
           return {
             resultRevision: state.resultRevision + 1,
-            analysisResult: {
-              ...state.analysisResult,
-              followUpQuestions: state.analysisResult.followUpQuestions.map((q) =>
-                q.id === id ? { ...q, userAnswer: answer, generatedBullet: "" } : q
-              ),
-            },
+            analysisResult: state.analysisResult
+              ? { ...state.analysisResult, followUpQuestions: updated }
+              : null,
+            partialAnalysisResult: state.partialAnalysisResult
+              ? { ...state.partialAnalysisResult, followUpQuestions: updated }
+              : null,
           };
         }),
 
       setFollowUpBullet: (id, bullet) =>
         set((state) => {
-          if (!state.analysisResult) return state;
+          const target = state.analysisResult || state.partialAnalysisResult;
+          if (!target || !target.followUpQuestions) return state;
+          const updated = target.followUpQuestions.map((q) =>
+            q.id === id ? { ...q, generatedBullet: bullet } : q
+          );
           return {
             resultRevision: state.resultRevision + 1,
-            analysisResult: {
-              ...state.analysisResult,
-              followUpQuestions: state.analysisResult.followUpQuestions.map((q) =>
-                q.id === id ? { ...q, generatedBullet: bullet } : q
-              ),
-            },
+            analysisResult: state.analysisResult
+              ? { ...state.analysisResult, followUpQuestions: updated }
+              : null,
+            partialAnalysisResult: state.partialAnalysisResult
+              ? { ...state.partialAnalysisResult, followUpQuestions: updated }
+              : null,
           };
         }),
 
       getStepStatus: (stepId: StepId) => {
-        const { currentStep, analysisResult, maxReachedStepIndex, isAnalyzing } = get();
+        const { currentStep, analysisResult, partialAnalysisResult, maxReachedStepIndex, isAnalyzing } = get();
         const stepIdx = STEPS.indexOf(stepId);
 
         if (stepId === currentStep) return "active";
@@ -349,7 +370,19 @@ Axure · Figma · Python (数据分析) · SQL · Prompt Optimization · LangCha
           return "disabled";
         }
 
-        if (!analysisResult && stepIdx > 0) {
+        const effectiveResult = analysisResult || partialAnalysisResult;
+        const hasStepData = Boolean(
+          analysisResult ||
+          (stepId === "jd-analysis" && effectiveResult?.jdAnalysis) ||
+          (stepId === "diagnosis" && effectiveResult?.diagnosis) ||
+          (stepId === "match" && effectiveResult?.matchItems) ||
+          (stepId === "follow-up" && effectiveResult?.followUpQuestions) ||
+          (stepId === "optimize" && effectiveResult?.optimizedItems) ||
+          (stepId === "interview" && effectiveResult?.interviewPrep) ||
+          (stepId === "export" && effectiveResult?.finalResume)
+        );
+
+        if (!hasStepData && stepIdx > 0) {
           return "disabled";
         }
 
@@ -431,11 +464,34 @@ Axure · Figma · Python (数据分析) · SQL · Prompt Optimization · LangCha
         const safeUserInput = { ...(state.userInput || {}) };
         delete safeUserInput.rawFileDataUrl;
         delete safeUserInput.avatarUrl;
-        const safeAnalysisResult = state.analysisResult
-          ? JSON.parse(JSON.stringify(state.analysisResult)) as AnalysisResult
-          : null;
-        if (safeAnalysisResult?.finalResume?.personalInfo) delete safeAnalysisResult.finalResume.personalInfo.avatarUrl;
-        if (safeAnalysisResult?.englishResume?.personalInfo) delete safeAnalysisResult.englishResume.personalInfo.avatarUrl;
+        let safeAnalysisResult = state.analysisResult;
+        if (safeAnalysisResult) {
+          const hasFinalAvatar = Boolean(safeAnalysisResult.finalResume?.personalInfo?.avatarUrl);
+          const hasEnAvatar = Boolean(safeAnalysisResult.englishResume?.personalInfo?.avatarUrl);
+          if (hasFinalAvatar || hasEnAvatar) {
+            safeAnalysisResult = {
+              ...safeAnalysisResult,
+              finalResume: safeAnalysisResult.finalResume && hasFinalAvatar
+                ? {
+                    ...safeAnalysisResult.finalResume,
+                    personalInfo: {
+                      ...safeAnalysisResult.finalResume.personalInfo,
+                      avatarUrl: undefined,
+                    },
+                  }
+                : safeAnalysisResult.finalResume,
+              englishResume: safeAnalysisResult.englishResume && hasEnAvatar
+                ? {
+                    ...safeAnalysisResult.englishResume,
+                    personalInfo: {
+                      ...safeAnalysisResult.englishResume.personalInfo,
+                      avatarUrl: undefined,
+                    },
+                  }
+                : safeAnalysisResult.englishResume,
+            };
+          }
+        }
         return {
           userInput: safeUserInput as typeof state.userInput,
           currentStep: state.currentStep,
@@ -452,6 +508,7 @@ Axure · Figma · Python (数据分析) · SQL · Prompt Optimization · LangCha
 
 /** Identity of the content from which a canvas was built (not UI or follow-up drafts). */
 export function getResumeSourceKey(): string {
-  const { sessionId, analysisResult, userInput } = useResumeStore.getState();
-  return JSON.stringify([sessionId, analysisResult?.finalResume ?? userInput]);
+  const { sessionId, analysisResult, partialAnalysisResult, userInput } = useResumeStore.getState();
+  const effectiveResume = analysisResult?.finalResume ?? partialAnalysisResult?.finalResume;
+  return JSON.stringify([sessionId, effectiveResume ?? userInput]);
 }

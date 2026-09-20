@@ -27,6 +27,19 @@ function cleanHtmlText(html: string): string {
     .trim();
 }
 
+function parseFiniteNumber(val: unknown, fallback: number): number {
+  if (typeof val === 'number') {
+    return Number.isFinite(val) ? val : fallback;
+  }
+  if (typeof val === 'string') {
+    const trimmed = val.trim();
+    if (!trimmed) return fallback;
+    const num = Number(trimmed);
+    return Number.isFinite(num) ? num : fallback;
+  }
+  return fallback;
+}
+
 export function ensureValidWidget(rawWidget: Record<string, unknown> | null | undefined, index?: number): IWidget {
   if (!rawWidget || typeof rawWidget !== 'object') {
     return {
@@ -38,25 +51,46 @@ export function ensureValidWidget(rawWidget: Record<string, unknown> | null | un
     };
   }
 
+  const componentName = rawWidget.componentName && typeof rawWidget.componentName === 'string'
+    ? rawWidget.componentName
+    : 'hj-text-1';
+
+  const isShapeOrLine = componentName === 'hj-rectangle' ||
+    componentName.startsWith('hj-other') ||
+    componentName === 'hj-circle' ||
+    componentName === 'hj-bg' ||
+    componentName.includes('line');
+  const isAvatar = componentName.startsWith('hj-avatar');
+
+  const minWidth = isShapeOrLine ? 1 : (isAvatar ? 20 : 10);
+  const minHeight = isShapeOrLine ? 1 : (isAvatar ? 20 : 10);
+  const defaultFallbackWidth = 200;
+  const defaultFallbackHeight = isShapeOrLine ? 2 : 40;
+
   const css = (rawWidget.css || {}) as Record<string, unknown>;
   const padding = (css.padding || {}) as Record<string, unknown>;
   const safePadding = {
-    top: padding.top !== undefined ? Number(padding.top) || 0 : 0,
-    right: padding.right !== undefined ? Number(padding.right) || 0 : 0,
-    bottom: padding.bottom !== undefined ? Number(padding.bottom) || 0 : 0,
-    left: padding.left !== undefined ? Number(padding.left) || 0 : 0
+    top: Math.max(0, Math.min(1000, parseFiniteNumber(padding.top, 0))),
+    right: Math.max(0, Math.min(1000, parseFiniteNumber(padding.right, 0))),
+    bottom: Math.max(0, Math.min(1000, parseFiniteNumber(padding.bottom, 0))),
+    left: Math.max(0, Math.min(1000, parseFiniteNumber(padding.left, 0)))
   };
 
+  const parsedLeft = parseFiniteNumber(css.left, 40);
+  const parsedTop = parseFiniteNumber(css.top, 40 + (index || 0) * 50);
+  const parsedWidth = parseFiniteNumber(css.width, defaultFallbackWidth);
+  const parsedHeight = parseFiniteNumber(css.height, defaultFallbackHeight);
+
   const safeCss: IWidgetCss = {
-    left: typeof css.left === 'number' ? css.left : (parseInt(String(css.left)) || 40),
-    top: typeof css.top === 'number' ? css.top : (parseInt(String(css.top)) || 40 + (index || 0) * 50),
-    zIndex: typeof css.zIndex === 'number' ? css.zIndex : 1,
-    width: typeof css.width === 'number' ? css.width : (parseInt(String(css.width)) || 200),
-    height: typeof css.height === 'number' ? css.height : (parseInt(String(css.height)) || 40),
-    rotate: typeof css.rotate === 'number' ? css.rotate : 0,
-    fontSize: typeof css.fontSize === 'number' ? css.fontSize : 14,
-    letterSpace: typeof css.letterSpace === 'number' ? css.letterSpace : (typeof css.letterSpacing === 'number' ? Number(css.letterSpacing) : 0),
-    lineHeight: typeof css.lineHeight === 'number' ? css.lineHeight : 1.5,
+    left: Math.max(-2000, Math.min(5000, parsedLeft)),
+    top: Math.max(-2000, Math.min(50000, parsedTop)),
+    zIndex: Math.round(parseFiniteNumber(css.zIndex, 1)),
+    width: Math.max(minWidth, Math.min(5000, parsedWidth)),
+    height: Math.max(minHeight, Math.min(20000, parsedHeight)),
+    rotate: Math.max(-360, Math.min(360, parseFiniteNumber(css.rotate, 0))),
+    fontSize: Math.max(8, Math.min(72, parseFiniteNumber(css.fontSize, 14))),
+    letterSpace: parseFiniteNumber(css.letterSpace ?? css.letterSpacing, 0),
+    lineHeight: Math.max(0.8, Math.min(4, parseFiniteNumber(css.lineHeight, 1.5))),
     fontFamily: (css.fontFamily as string) || 'Inter, sans-serif',
     fontWeight: (css.fontWeight as string | number) || 400,
     textAlign: (css.textAlign as IWidgetCss['textAlign']) || 'left',
@@ -74,9 +108,7 @@ export function ensureValidWidget(rawWidget: Record<string, unknown> | null | un
     paddingLeft: typeof css.paddingLeft === 'number' ? css.paddingLeft : undefined
   };
 
-  const componentName = rawWidget.componentName && typeof rawWidget.componentName === 'string'
-    ? rawWidget.componentName
-    : 'hj-text-1';
+
 
   const dataSource: IWidgetDataSource = rawWidget.dataSource && typeof rawWidget.dataSource === 'object'
     ? { ...(rawWidget.dataSource as Record<string, unknown>) }

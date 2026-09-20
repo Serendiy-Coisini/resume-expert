@@ -15,6 +15,7 @@ import { useResumeStore } from "@/store/resume-store";
 export function FollowUpStep() {
   const {
     analysisResult,
+    partialAnalysisResult,
     userInput,
     optimizeStyle,
     updateFollowUpAnswer,
@@ -22,7 +23,21 @@ export function FollowUpStep() {
     patchAnalysisResult,
     setCurrentStep,
     sessionId,
-  } = useResumeStore(useShallow((state) => ({ analysisResult: state.analysisResult, userInput: state.userInput, optimizeStyle: state.optimizeStyle, updateFollowUpAnswer: state.updateFollowUpAnswer, setFollowUpBullet: state.setFollowUpBullet, patchAnalysisResult: state.patchAnalysisResult, setCurrentStep: state.setCurrentStep, sessionId: state.sessionId })));
+  } = useResumeStore(
+    useShallow((state) => ({
+      analysisResult: state.analysisResult,
+      partialAnalysisResult: state.partialAnalysisResult,
+      userInput: state.userInput,
+      optimizeStyle: state.optimizeStyle,
+      updateFollowUpAnswer: state.updateFollowUpAnswer,
+      setFollowUpBullet: state.setFollowUpBullet,
+      patchAnalysisResult: state.patchAnalysisResult,
+      setCurrentStep: state.setCurrentStep,
+      sessionId: state.sessionId,
+    }))
+  );
+
+  const effectiveResult = analysisResult || partialAnalysisResult;
   const tasks = useRef(new Set<AbortController>());
   useEffect(() => { const active = tasks.current; return () => active.forEach(task => task.abort()); }, []);
   const [loadingIds, setLoadingIds] = useState<Set<string>>(new Set());
@@ -31,7 +46,7 @@ export function FollowUpStep() {
   const [error, setError] = useState<string | null>(null);
   const [customGeneratedIds, setCustomGeneratedIds] = useState<Set<string>>(new Set());
 
-  if (!analysisResult || !analysisResult.followUpQuestions) {
+  if (!effectiveResult || !effectiveResult.followUpQuestions) {
     return (
       <EmptyState
         message="请先完成输入材料并开始分析"
@@ -41,7 +56,7 @@ export function FollowUpStep() {
     );
   }
 
-  const { followUpQuestions } = analysisResult;
+  const { followUpQuestions } = effectiveResult;
 
   const generatedBullets = followUpQuestions
     .filter((q) => q.userAnswer.trim() && q.generatedBullet.trim())
@@ -66,7 +81,7 @@ export function FollowUpStep() {
         question.userAnswer, task.signal
       );
       const current = useResumeStore.getState();
-      const currentQuestion = current.analysisResult?.followUpQuestions.find((item) => item.id === id);
+      const currentQuestion = (current.analysisResult || current.partialAnalysisResult)?.followUpQuestions?.find((item) => item.id === id);
       if (current.sessionId === startedSessionId && currentQuestion?.userAnswer === startedAnswer) {
         setFollowUpBullet(id, bullet);
         setCustomGeneratedIds((prev) => new Set(prev).add(id));

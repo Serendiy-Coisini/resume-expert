@@ -33,7 +33,19 @@ import { Textarea } from "@/components/ui/textarea";
 import { ResumeTemplateView } from "@/components/shared/resume-template-view";
 import { TemplateSelector } from "@/components/shared/template-selector";
 import { TemplateCustomizer } from "@/components/shared/template-customizer";
-import { LegoDesigner } from "@/components/legoDesigner";
+import dynamic from "next/dynamic";
+
+const LegoDesigner = dynamic(
+  () => import("@/components/legoDesigner").then((mod) => mod.LegoDesigner),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="flex h-[70vh] items-center justify-center">
+        <div className="text-sm text-neutral-500">正在加载积木排版设计器...</div>
+      </div>
+    ),
+  }
+);
 import { EmptyState, SectionTitle } from "@/components/shared/ui-helpers";
 import { buildLegoSchemaFromResume } from "@/lib/lego-adapter";
 import { useLegoDesignerStore } from "@/store/lego-designer-store";
@@ -49,6 +61,7 @@ export function ExportStep() {
     userInput,
     setUserInput,
     analysisResult,
+    partialAnalysisResult,
     setAnalysisResult,
     selectedTemplate,
     setSelectedTemplate,
@@ -57,7 +70,8 @@ export function ExportStep() {
     copied,
     setCopied,
     setCurrentStep,
-  } = useResumeStore(useShallow((state) => ({ userInput: state.userInput, setUserInput: state.setUserInput, analysisResult: state.analysisResult, setAnalysisResult: state.setAnalysisResult, selectedTemplate: state.selectedTemplate, setSelectedTemplate: state.setSelectedTemplate, templateOptions: state.templateOptions, customTemplateHTML: state.customTemplateHTML, copied: state.copied, setCopied: state.setCopied, setCurrentStep: state.setCurrentStep })));
+  } = useResumeStore(useShallow((state) => ({ userInput: state.userInput, setUserInput: state.setUserInput, analysisResult: state.analysisResult,
+    partialAnalysisResult: state.partialAnalysisResult, setAnalysisResult: state.setAnalysisResult, selectedTemplate: state.selectedTemplate, setSelectedTemplate: state.setSelectedTemplate, templateOptions: state.templateOptions, customTemplateHTML: state.customTemplateHTML, copied: state.copied, setCopied: state.setCopied, setCurrentStep: state.setCurrentStep })));
   const startAvatarUpload = useInputTask();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [viewMode, setViewMode] = useState<"standard" | "compare" | "lego">("standard");
@@ -74,7 +88,9 @@ export function ExportStep() {
     return "";
   }, [userInput.rawFileType, userInput.rawFileDataUrl]);
 
-  if (!analysisResult?.finalResume) {
+  const effectiveResult = analysisResult || partialAnalysisResult;
+
+  if (!effectiveResult?.finalResume) {
     return (
       <EmptyState
         message="尚未生成完整简历，请返回输入材料重试分析"
@@ -84,7 +100,18 @@ export function ExportStep() {
     );
   }
 
-  const { finalResume, englishResume } = analysisResult;
+  const { finalResume, englishResume } = effectiveResult;
+  const fullResult: import("@/types/resume").AnalysisResult = {
+    jdAnalysis: effectiveResult.jdAnalysis || { responsibilities: [], hardRequirements: [], implicitRequirements: [], keywords: [], idealCandidate: "", coreCompetencies: [] },
+    diagnosis: effectiveResult.diagnosis || { overallScore: 0, dimensionScores: [], mainIssues: [], prioritySuggestions: [] },
+    matchItems: effectiveResult.matchItems || [],
+    followUpQuestions: effectiveResult.followUpQuestions || [],
+    optimizedItems: effectiveResult.optimizedItems || [],
+    finalResume: finalResume,
+    englishResume: englishResume,
+    interviewPrep: effectiveResult.interviewPrep || { likelyQuestions: [], evidenceToPrepare: [], possibleExaggerations: [], dataToSupplement: [], selfIntroduction: "" },
+  };
+  const exportSafeResult = analysisResult || fullResult;
   const hasEnglish = Boolean(englishResume);
   const isForeign = isForeignCompany(userInput.companyType);
 
@@ -104,33 +131,63 @@ export function ExportStep() {
     reader.onloadend = () => task.finish();
     reader.onload = (event) => {
       if (!task.isCurrent() || useResumeStore.getState().userInput.avatarUrl !== startedAvatar) return;
-      const analysisResult = useResumeStore.getState().analysisResult;
       const base64 = event.target?.result as string;
       if (base64) {
         setUserInput({ avatarUrl: base64 });
-        if (!analysisResult) return;
-        const { finalResume, englishResume } = analysisResult;
-        setAnalysisResult({
-          ...analysisResult,
-          finalResume: {
-            ...finalResume,
-            personalInfo: {
-              ...(finalResume.personalInfo || { name: "", email: "", phone: "", location: "" }),
-              avatarUrl: base64,
+        const state = useResumeStore.getState();
+        if (state.analysisResult) {
+          const currentResult = state.analysisResult;
+          const { finalResume: fRes, englishResume: eRes } = currentResult;
+          setAnalysisResult({
+            ...currentResult,
+            finalResume: {
+              ...fRes,
+              personalInfo: {
+                ...(fRes.personalInfo || { name: "", email: "", phone: "", location: "" }),
+                avatarUrl: base64,
+              },
             },
-          },
-          ...(englishResume
-            ? {
-                englishResume: {
-                  ...englishResume,
-                  personalInfo: {
-                    ...(englishResume.personalInfo || { name: "", email: "", phone: "", location: "" }),
-                    avatarUrl: base64,
+            ...(eRes
+              ? {
+                  englishResume: {
+                    ...eRes,
+                    personalInfo: {
+                      ...(eRes.personalInfo || { name: "", email: "", phone: "", location: "" }),
+                      avatarUrl: base64,
+                    },
                   },
+                }
+              : {}),
+          });
+        } else if (state.partialAnalysisResult?.finalResume) {
+          const currentPartial = state.partialAnalysisResult;
+          const fRes = currentPartial.finalResume;
+          if (!fRes) return;
+          const eRes = currentPartial.englishResume;
+          useResumeStore.setState({
+            partialAnalysisResult: {
+              ...currentPartial,
+              finalResume: {
+                ...fRes,
+                personalInfo: {
+                  ...(fRes.personalInfo || { name: "", email: "", phone: "", location: "" }),
+                  avatarUrl: base64,
                 },
-              }
-            : {}),
-        });
+              },
+              ...(eRes
+                ? {
+                    englishResume: {
+                      ...eRes,
+                      personalInfo: {
+                        ...(eRes.personalInfo || { name: "", email: "", phone: "", location: "" }),
+                        avatarUrl: base64,
+                      },
+                    },
+                  }
+                : {}),
+            },
+          });
+        }
       }
     };
     reader.readAsDataURL(file);
@@ -139,27 +196,42 @@ export function ExportStep() {
 
   const handleRemoveAvatar = () => {
     setUserInput({ avatarUrl: "" });
-    setAnalysisResult({
-      ...analysisResult,
-      finalResume: {
-        ...finalResume,
-        personalInfo: {
-          ...(finalResume.personalInfo || { name: "", email: "", phone: "", location: "" }),
-          avatarUrl: "",
+    if (analysisResult) {
+      setAnalysisResult({
+        ...analysisResult,
+        finalResume: {
+          ...finalResume,
+          personalInfo: {
+            ...(finalResume.personalInfo || { name: "", email: "", phone: "", location: "" }),
+            avatarUrl: "",
+          },
         },
-      },
-      ...(englishResume
-        ? {
-            englishResume: {
-              ...englishResume,
-              personalInfo: {
-                ...(englishResume.personalInfo || { name: "", email: "", phone: "", location: "" }),
-                avatarUrl: "",
+        ...(englishResume
+          ? {
+              englishResume: {
+                ...englishResume,
+                personalInfo: {
+                  ...(englishResume.personalInfo || { name: "", email: "", phone: "", location: "" }),
+                  avatarUrl: "",
+                },
               },
+            }
+          : {}),
+      });
+    } else if (partialAnalysisResult?.finalResume) {
+      useResumeStore.setState({
+        partialAnalysisResult: {
+          ...partialAnalysisResult,
+          finalResume: {
+            ...partialAnalysisResult.finalResume,
+            personalInfo: {
+              ...(partialAnalysisResult.finalResume.personalInfo || { name: "", email: "", phone: "", location: "" }),
+              avatarUrl: "",
             },
-          }
-        : {}),
-    });
+          },
+        },
+      });
+    }
     if (avatarInputRef.current) {
       avatarInputRef.current.value = "";
     }
@@ -184,7 +256,7 @@ export function ExportStep() {
 
   const handleImportToLego = (tplId: TemplateId) => {
     setSelectedTemplate(tplId);
-    const freshSchema = buildLegoSchemaFromResume(userInput, analysisResult, tplId, templateOptions, customTemplateHTML);
+    const freshSchema = buildLegoSchemaFromResume(userInput, exportSafeResult, tplId, templateOptions, customTemplateHTML);
     useLegoDesignerStore.getState().setSchema(freshSchema, true);
     setViewMode("lego");
   };
@@ -280,10 +352,10 @@ export function ExportStep() {
             </div>
             <div className="flex items-center gap-2">
               <Badge variant="outline" className="bg-white text-blue-700 border-blue-200 text-[11px]">
-                修改优化 {analysisResult.optimizedItems?.length || 0} 处
+                修改优化 {exportSafeResult.optimizedItems?.length || 0} 处
               </Badge>
               <Badge variant="outline" className="bg-white text-emerald-700 border-emerald-200 text-[11px]">
-                匹配度 {analysisResult.diagnosis?.overallScore ?? 0}/100
+                匹配度 {exportSafeResult.diagnosis?.overallScore ?? 0}/100
               </Badge>
               <Button
                 variant="outline"
@@ -672,21 +744,21 @@ export function ExportStep() {
             <div className="rounded-md border border-indigo-100 bg-white/80 p-3 shadow-2xs">
               <p className="text-xs text-neutral-500">匹配度评分</p>
               <p className="text-2xl font-bold tabular-nums text-indigo-600">
-                {analysisResult.diagnosis?.overallScore ?? 0}
+                {exportSafeResult.diagnosis?.overallScore ?? 0}
                 <span className="text-sm font-normal text-neutral-400">/100</span>
               </p>
             </div>
             <div className="rounded-md border border-indigo-100 bg-white/80 p-3 shadow-2xs">
               <p className="text-xs text-neutral-500">人岗匹配对比项</p>
               <p className="text-2xl font-bold tabular-nums text-blue-600">
-                {analysisResult.matchItems?.length ?? 0}
+                {exportSafeResult.matchItems?.length ?? 0}
                 <span className="text-sm font-normal text-neutral-400"> 条</span>
               </p>
             </div>
             <div className="rounded-md border border-indigo-100 bg-white/80 p-3 shadow-2xs">
               <p className="text-xs text-neutral-500">面试追问预案</p>
               <p className="text-2xl font-bold tabular-nums text-purple-600">
-                {analysisResult.interviewPrep?.likelyQuestions?.length ?? 0}
+                {exportSafeResult.interviewPrep?.likelyQuestions?.length ?? 0}
                 <span className="text-sm font-normal text-neutral-400"> 题</span>
               </p>
             </div>
@@ -694,29 +766,29 @@ export function ExportStep() {
 
           <div className="pt-2 border-t border-indigo-100/80 flex flex-wrap gap-2.5">
             <Button
-              disabled={!analysisResult.jdAnalysis || !analysisResult.diagnosis || !analysisResult.matchItems || !analysisResult.interviewPrep}
-              onClick={() => exportFullAnalysisAsPDF(userInput, analysisResult)}
+              disabled={!exportSafeResult.jdAnalysis || !exportSafeResult.diagnosis || !exportSafeResult.matchItems || !exportSafeResult.interviewPrep}
+              onClick={() => exportFullAnalysisAsPDF(userInput, exportSafeResult)}
               className="flex-1 min-w-[240px] bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-700 hover:to-blue-700 text-white shadow-md shadow-indigo-500/20 font-bold text-xs py-5"
             >
               <Printer className="h-4 w-4 mr-2" />
               📄 导出全景综合报告 PDF（含 JD解析+诊断+匹配+面试准备）
             </Button>
-            {analysisResult.jdAnalysis && (
+            {exportSafeResult.jdAnalysis && (
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => exportJDAnalysisAsPDF(userInput, analysisResult.jdAnalysis)}
+                onClick={() => exportJDAnalysisAsPDF(userInput, exportSafeResult.jdAnalysis)}
                 className="bg-white border-blue-200 text-blue-700 hover:bg-blue-50 text-xs"
               >
                 <Download className="h-3.5 w-3.5 mr-1 text-blue-600" />
                 仅导出 JD 解析 PDF
               </Button>
             )}
-            {analysisResult.interviewPrep && (
+            {exportSafeResult.interviewPrep && (
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => exportInterviewPrepAsPDF(userInput, analysisResult.interviewPrep)}
+                onClick={() => exportInterviewPrepAsPDF(userInput, exportSafeResult.interviewPrep)}
                 className="bg-white border-purple-200 text-purple-700 hover:bg-purple-50 text-xs"
               >
                 <Download className="h-3.5 w-3.5 mr-1 text-purple-600" />

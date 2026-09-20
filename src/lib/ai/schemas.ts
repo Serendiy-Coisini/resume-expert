@@ -23,6 +23,16 @@ const evidenceStrengthSchema = z
   .enum(["strong", "medium", "weak", "none"])
   .catch("none");
 
+/** Non-empty string array that trims entries and strips empty/whitespace/null elements. */
+export const cleanStringArraySchema = z
+  .array(z.unknown())
+  .transform((items) =>
+    items
+      .map((item) => (typeof item === "string" ? item.trim() : ""))
+      .filter((item) => item.length > 0)
+  )
+  .catch([]);
+
 // ---------------------------------------------------------------------------
 // Component schemas
 // ---------------------------------------------------------------------------
@@ -33,11 +43,11 @@ const coreCompetencySchema = z.object({
   description: z.string().catch(""),
 });
 
-const jdAnalysisObjectSchema = z.object({
-  responsibilities: z.array(z.string().catch("")).catch([]),
-  hardRequirements: z.array(z.string().catch("")).catch([]),
-  implicitRequirements: z.array(z.string().catch("")).catch([]),
-  keywords: z.array(z.string().catch("")).catch([]),
+export const jdAnalysisObjectSchema = z.object({
+  responsibilities: cleanStringArraySchema,
+  hardRequirements: cleanStringArraySchema,
+  implicitRequirements: cleanStringArraySchema,
+  keywords: cleanStringArraySchema,
   idealCandidate: z.string().catch(""),
   coreCompetencies: z.array(coreCompetencySchema).catch([]),
 });
@@ -51,8 +61,8 @@ const dimensionScoreSchema = z.object({
 const diagnosisObjectSchema = z.object({
   overallScore: scoreSchema,
   dimensionScores: z.array(dimensionScoreSchema).catch([]),
-  mainIssues: z.array(z.string().catch("")).catch([]),
-  prioritySuggestions: z.array(z.string().catch("")).catch([]),
+  mainIssues: cleanStringArraySchema,
+  prioritySuggestions: cleanStringArraySchema,
 });
 
 const matchItemSchema = z.object({
@@ -72,7 +82,7 @@ const followUpQuestionSchema = z.object({
   presetBullet: z.string().optional().catch(""),
 });
 
-const optimizedItemSchema = z.object({
+const rawOptimizedItemSchema = z.object({
   id: z.string().catch(""),
   section: z.string().catch(""),
   before: z.string().catch(""),
@@ -81,18 +91,35 @@ const optimizedItemSchema = z.object({
   riskWarning: z.string().catch(""),
 });
 
-const workExperienceSchema = z.object({
+const optimizedItemSchema = rawOptimizedItemSchema.refine(
+  (item) => item.after.trim().length > 0 || item.before.trim().length > 0,
+  { message: "改写条目缺少有效内容" }
+);
+
+export const validOptimizedItemsSchema = z
+  .array(z.unknown())
+  .transform((items) =>
+    items
+      .map((item) => {
+        const res = optimizedItemSchema.safeParse(item);
+        return res.success ? res.data : null;
+      })
+      .filter((item): item is z.infer<typeof rawOptimizedItemSchema> => Boolean(item))
+  )
+  .catch([]);
+
+export const workExperienceSchema = z.object({
   company: z.string().catch(""),
   role: z.string().catch(""),
   period: z.string().catch(""),
-  bullets: z.array(z.string().catch("")).catch([]),
+  bullets: cleanStringArraySchema,
 });
 
-const projectExperienceSchema = z.object({
+export const projectExperienceSchema = z.object({
   name: z.string().catch(""),
   role: z.string().catch(""),
   period: z.string().catch(""),
-  bullets: z.array(z.string().catch("")).catch([]),
+  bullets: cleanStringArraySchema,
 });
 
 const educationSchema = z.object({
@@ -112,24 +139,24 @@ const finalResumeObjectSchema = z.object({
   personalInfo: personalInfoSchema.catch({ name: "", email: "", phone: "", location: "" }),
   jobIntent: z.string().catch(""),
   summary: z.string().catch(""),
-  coreSkills: z.array(z.string().catch("")).catch([]),
+  coreSkills: cleanStringArraySchema,
   workExperience: z.array(workExperienceSchema).catch([]),
   projectExperience: z.array(projectExperienceSchema).catch([]),
-  skillsAndTools: z.array(z.string().catch("")).catch([]),
+  skillsAndTools: cleanStringArraySchema,
   education: educationSchema.catch({ school: "", degree: "", period: "" }),
 });
 
 const interviewQuestionSchema = z.object({
   question: z.string().catch(""),
   suggestedAnswer: z.string().catch(""),
-  evidenceNeeded: z.array(z.string().catch("")).catch([]),
+  evidenceNeeded: cleanStringArraySchema,
 });
 
 const interviewPrepObjectSchema = z.object({
   likelyQuestions: z.array(interviewQuestionSchema).catch([]),
-  evidenceToPrepare: z.array(z.string().catch("")).catch([]),
-  possibleExaggerations: z.array(z.string().catch("")).catch([]),
-  dataToSupplement: z.array(z.string().catch("")).catch([]),
+  evidenceToPrepare: cleanStringArraySchema,
+  possibleExaggerations: cleanStringArraySchema,
+  dataToSupplement: cleanStringArraySchema,
   selfIntroduction: z.string().catch(""),
 });
 
@@ -168,7 +195,7 @@ export const diagnosisMatchResponseSchema = z
 /** Step 3: Optimized items + final resume. */
 export const optimizeResumeResponseSchema = z
   .object({
-    optimizedItems: z.array(optimizedItemSchema).catch([]),
+    optimizedItems: validOptimizedItemsSchema,
     finalResume: finalResumeObjectSchema,
     englishResume: finalResumeObjectSchema.optional(),
   })
@@ -176,8 +203,8 @@ export const optimizeResumeResponseSchema = z
   .refine(({ optimizedItems, finalResume }) =>
     optimizedItems.length > 0 && (
       finalResume.summary.trim().length > 0 ||
-      finalResume.workExperience.length > 0 ||
-      finalResume.projectExperience.length > 0
+      finalResume.workExperience.some((w) => w.bullets.length > 0 || w.company.trim().length > 0) ||
+      finalResume.projectExperience.some((p) => p.bullets.length > 0 || p.name.trim().length > 0)
     ),
   { message: "简历优化结果不完整" });
 
@@ -196,7 +223,7 @@ export const interviewResponseSchema = z
 /** Re-optimize (style change). */
 export const optimizedItemsResponseSchema = z
   .object({
-    optimizedItems: z.array(optimizedItemSchema).catch([]),
+    optimizedItems: validOptimizedItemsSchema,
   })
   .passthrough()
   .refine(({ optimizedItems }) => optimizedItems.length > 0, { message: "改写结果为空" });
@@ -208,3 +235,126 @@ export const bulletResponseSchema = z
   })
   .passthrough()
   .refine(({ bullet }) => bullet.trim().length > 0, { message: "Bullet 结果为空" });
+
+// ---------------------------------------------------------------------------
+// Strict Complete Analysis Result Schema
+// ---------------------------------------------------------------------------
+
+/**
+ * Strict schema for FinalResume in complete results.
+ * Shared between Chinese finalResume and optional englishResume.
+ */
+export const completeFinalResumeSchema = z.object({
+  personalInfo: z.object({
+    name: z.string(),
+    email: z.string(),
+    phone: z.string(),
+    location: z.string(),
+    avatarUrl: z.string().optional(),
+  }),
+  jobIntent: z.string(),
+  summary: z.string(),
+  coreSkills: z.array(z.string()),
+  workExperience: z.array(
+    z.object({
+      company: z.string(),
+      role: z.string(),
+      period: z.string(),
+      bullets: z.array(z.string()),
+    })
+  ),
+  projectExperience: z.array(
+    z.object({
+      name: z.string(),
+      role: z.string(),
+      period: z.string(),
+      bullets: z.array(z.string()),
+    })
+  ),
+  skillsAndTools: z.array(z.string()),
+  education: z.object({
+    school: z.string(),
+    degree: z.string(),
+    period: z.string(),
+  }),
+});
+
+/**
+ * Strict schema for verifying a genuinely complete AnalysisResult.
+ * Validates that all sections and nested structures required by UI step pages
+ * (e.g. jdAnalysis.coreCompetencies, diagnosis.dimensionScores, interviewPrep.likelyQuestions,
+ * finalResume.workExperience, etc.) are present and properly typed as arrays or objects.
+ */
+export const completeAnalysisResultSchema = z.object({
+  jdAnalysis: z.object({
+    responsibilities: z.array(z.string()),
+    hardRequirements: z.array(z.string()),
+    implicitRequirements: z.array(z.string()),
+    keywords: z.array(z.string()),
+    idealCandidate: z.string(),
+    coreCompetencies: z.array(
+      z.object({
+        name: z.string(),
+        importance: z.enum(["high", "medium", "low"]),
+        description: z.string(),
+      })
+    ),
+  }),
+  diagnosis: z.object({
+    overallScore: z.number(),
+    dimensionScores: z.array(
+      z.object({
+        dimension: z.string(),
+        score: z.number(),
+        comment: z.string(),
+      })
+    ),
+    mainIssues: z.array(z.string()),
+    prioritySuggestions: z.array(z.string()),
+  }),
+  matchItems: z.array(
+    z.object({
+      jdRequirement: z.string(),
+      resumeEvidence: z.string(),
+      evidenceStrength: z.enum(["strong", "medium", "weak", "none"]),
+      needsSupplement: z.boolean(),
+      optimizationSuggestion: z.string(),
+    })
+  ),
+  followUpQuestions: z.array(
+    z.object({
+      id: z.string(),
+      question: z.string(),
+      purpose: z.string(),
+      userAnswer: z.string(),
+      generatedBullet: z.string(),
+      presetBullet: z.string().optional(),
+    })
+  ),
+  optimizedItems: z.array(
+    z.object({
+      id: z.string(),
+      section: z.string(),
+      before: z.string(),
+      after: z.string(),
+      reason: z.string(),
+      riskWarning: z.string(),
+    })
+  ),
+  finalResume: completeFinalResumeSchema,
+  englishResume: completeFinalResumeSchema.optional(),
+  interviewPrep: z.object({
+    likelyQuestions: z.array(
+      z.object({
+        question: z.string(),
+        suggestedAnswer: z.string(),
+        evidenceNeeded: z.array(z.string()),
+      })
+    ),
+    evidenceToPrepare: z.array(z.string()),
+    possibleExaggerations: z.array(z.string()),
+    dataToSupplement: z.array(z.string()),
+    selfIntroduction: z.string(),
+  }),
+});
+

@@ -60,28 +60,49 @@ function deepClone<T>(obj: T): T {
   return JSON.parse(JSON.stringify(obj));
 }
 
+// Cleanly serialize templates to localStorage without duplicating alias fields
+export function serializeTemplates(templates: SavedTemplate[]): string {
+  const minimal = templates.map((t) => ({
+    id: t.id || t._id,
+    name: t.name || t.title,
+    category: t.category,
+    description: t.description,
+    cover: t.cover || t.previewUrl || '',
+    createTime: t.createTime,
+    schema: t.schema || t.template_json,
+    isCustom: t.isCustom,
+  }));
+  return JSON.stringify(minimal);
+}
+
 // Load templates from localStorage on init
-const loadTemplatesFromStorage = (): SavedTemplate[] => {
+export const loadTemplatesFromStorage = (): SavedTemplate[] => {
   if (typeof window === 'undefined') return [];
   try {
     const raw = localStorage.getItem(TEMPLATES_STORAGE_KEY);
     if (raw) {
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed)) {
-        return parsed.map((item) => ({
-          id: item.id || item._id || `tpl-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-          _id: item._id || item.id,
-          name: item.name || item.title || '自定义模板',
-          title: item.title || item.name || '自定义模板',
-          category: item.category || '个人自定义',
-          description: item.description || '',
-          cover: item.cover || item.previewUrl || '',
-          previewUrl: item.previewUrl || item.cover || '',
-          createTime: item.createTime || new Date().toLocaleDateString('zh-CN'),
-          schema: item.schema || item.template_json || deepClone(DEFAULT_LEGO_SCHEMA),
-          template_json: item.template_json || item.schema || deepClone(DEFAULT_LEGO_SCHEMA),
-          isCustom: true
-        }));
+        return parsed.map((item) => {
+          const id = item.id || item._id || `tpl-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+          const name = item.name || item.title || '自定义模板';
+          const cover = item.cover || item.previewUrl || '';
+          const schema = item.schema || item.template_json || deepClone(DEFAULT_LEGO_SCHEMA);
+          return {
+            id,
+            _id: id,
+            name,
+            title: name,
+            category: item.category || '个人自定义',
+            description: item.description || '',
+            cover,
+            previewUrl: cover,
+            createTime: item.createTime || new Date().toLocaleDateString('zh-CN'),
+            schema,
+            template_json: schema,
+            isCustom: true,
+          };
+        });
       }
     }
   } catch (err) {
@@ -93,17 +114,17 @@ const loadTemplatesFromStorage = (): SavedTemplate[] => {
 const saveTemplatesToStorage = (templates: SavedTemplate[]) => {
   if (typeof window === 'undefined') return;
   try {
-    localStorage.setItem(TEMPLATES_STORAGE_KEY, JSON.stringify(templates));
+    localStorage.setItem(TEMPLATES_STORAGE_KEY, serializeTemplates(templates));
   } catch (err) {
     console.warn('localStorage 空间受限，尝试压缩模板封面缩略图...', err);
     try {
       // Fallback 1: Keep covers only for the 2 most recent templates to save quota
       const lightweight = templates.map((t, idx) => ({
         ...t,
-        cover: idx < 2 ? t.cover : '',
-        previewUrl: idx < 2 ? (t.previewUrl || t.cover) : ''
+        cover: idx < 2 ? (t.cover || t.previewUrl || '') : '',
+        previewUrl: idx < 2 ? (t.previewUrl || t.cover || '') : ''
       }));
-      localStorage.setItem(TEMPLATES_STORAGE_KEY, JSON.stringify(lightweight));
+      localStorage.setItem(TEMPLATES_STORAGE_KEY, serializeTemplates(lightweight));
     } catch {
       try {
         // Fallback 2: Strip covers without discarding any templates
@@ -112,7 +133,7 @@ const saveTemplatesToStorage = (templates: SavedTemplate[]) => {
           cover: '',
           previewUrl: ''
         }));
-        localStorage.setItem(TEMPLATES_STORAGE_KEY, JSON.stringify(stripped));
+        localStorage.setItem(TEMPLATES_STORAGE_KEY, serializeTemplates(stripped));
       } catch (finalErr) {
         console.error('无法持久化模板至 localStorage：', finalErr);
         throw new Error('模板未能保存到浏览器，请释放存储空间或导出 JSON 备份。');

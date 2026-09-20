@@ -85,6 +85,10 @@ export interface AnalysisStreamCallbacks {
   onPartialResult?: (partialResult: Partial<AnalysisResult>) => void;
 }
 
+/**
+ * @deprecated 建议优先使用支持流式进度及阶段性结果更新的 `runResumeAnalysisStream`。
+ * 该同步全量方法仅用于兼容非流式或一次性调用场景。
+ */
 export async function runResumeAnalysis(
   input: UserInput,
   optimizeStyle: OptimizeStyle = "ai-product",

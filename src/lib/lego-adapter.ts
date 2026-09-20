@@ -1422,7 +1422,7 @@ export function fillAiDataIntoExistingSchema(
 
 export function buildLegoSchemaFromResume(
   userInput: UserInput,
-  analysisResult?: AnalysisResult | null,
+  analysisResult?: AnalysisResult | Partial<AnalysisResult> | null,
   templateId: TemplateId = 'modern-sidebar',
   options: TemplateOptions = DEFAULT_TEMPLATE_OPTIONS,
   _customTemplateHTML?: string

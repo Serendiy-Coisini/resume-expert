@@ -7,14 +7,13 @@ import { RequestValidationError } from "@/lib/ai/request-validation";
 
 export { LLMError } from "@/lib/ai/errors";
 
-interface ChatCompletionOptions {
+interface ChatCompletionOptions<T = unknown> {
   system: string;
   user: string;
   temperature?: number;
   maxTokens?: number;
   /** Optional Zod schema for runtime validation of the parsed JSON. */
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  schema?: ZodType<any>;
+  schema?: ZodType<T>;
   signal?: AbortSignal;
 }
 
@@ -24,7 +23,7 @@ interface ChatMessage {
 }
 
 export async function chatCompletionJSON<T>(
-  options: ChatCompletionOptions,
+  options: ChatCompletionOptions<T>,
   customConfig?: AIConfig
 ): Promise<T> {
   try {
@@ -36,7 +35,7 @@ export async function chatCompletionJSON<T>(
 }
 
 async function requestChatCompletionJSON<T>(
-  options: ChatCompletionOptions,
+  options: ChatCompletionOptions<T>,
   customConfig?: AIConfig
 ): Promise<T> {
   const config = customConfig ?? getAIConfig();
@@ -75,7 +74,7 @@ const RETRYABLE_STATUS_CODES = new Set([429, 500, 502, 503, 504]);
 
 async function callChatCompletions(
   config: ReturnType<typeof getAIConfig>,
-  options: ChatCompletionOptions
+  options: ChatCompletionOptions<unknown>
 ) {
   const maxRetries = 1;
   let attempt = 0;
@@ -124,8 +123,10 @@ async function callChatCompletions(
         }
 
         let userFriendlyMsg = "";
-        if (response.status === 429 || isQuotaDepleted) {
-          userFriendlyMsg = "AI 大模型 API Key 额度已用尽 (HTTP 429 Insufficient Quota)。请前往右上方「AI 配置」更换有效 Key，或点击下方重置为 Mock 免费模式。";
+        if (isQuotaDepleted) {
+          userFriendlyMsg = "AI 大模型 API Key 额度已用尽 (Insufficient Quota)。请前往右上方「AI 配置」更换有效 Key，或点击下方重置为 Mock 免费模式。";
+        } else if (response.status === 429) {
+          userFriendlyMsg = "AI 大模型请求频率过高 (HTTP 429 Rate Limit)。请稍后重试，或前往「AI 配置」切换更高并发的服务商/模型。";
         } else if (response.status === 401 || detail.includes("invalid_api_key")) {
           userFriendlyMsg = "AI 大模型 API Key 无效或未授权 (HTTP 401 Unauthorized)。请前往右上方「AI 配置」重新检查密钥。";
         } else {

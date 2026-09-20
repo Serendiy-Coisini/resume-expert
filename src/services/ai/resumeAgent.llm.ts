@@ -73,41 +73,39 @@ export async function runLLMResumeAnalysisStream(
   config?: AIConfig,
   signal?: AbortSignal
 ): Promise<AnalysisResult> {
-  // Stage 1: JD analysis with one retry; propagate failures.
-  onStageUpdate?.({ stage: "jd-analysis", status: "start" });
-  let jdData: JDAnalysisResult["jdAnalysis"];
-  try {
-    const jd = await chatCompletionJSON<JDAnalysisResult>(
-      {
-        system: RESUME_AGENT_SYSTEM_PROMPT,
-        user: buildAnalyzeCorePrompt(input),
-        maxTokens: 3000,
-        schema: jdAnalysisResponseSchema,
-        signal,
-      },
-      config
-    );
-    jdData = jd.jdAnalysis;
-  } catch (err) {
-    if (!shouldRetryStage(err, signal)) throw err;
-    console.warn("[runLLMResumeAnalysisStream] Stage 1 (jd-analysis) failed, retrying...", err);
+  async function runStageWithRetry<T>(
+    stageTag: string,
+    stageLabel: string,
+    options: Parameters<typeof chatCompletionJSON<T>>[0]
+  ): Promise<T> {
     try {
-      const jd = await chatCompletionJSON<JDAnalysisResult>(
-        {
-          system: RESUME_AGENT_SYSTEM_PROMPT,
-          user: buildAnalyzeCorePrompt(input),
-          maxTokens: 3000,
-          schema: jdAnalysisResponseSchema,
-          signal,
-        },
-        config
-      );
-      jdData = jd.jdAnalysis;
-    } catch (retryErr) {
-      console.warn("[runLLMResumeAnalysisStream] JD analysis failed:", retryErr);
-      throw retryErr;
+      return await chatCompletionJSON<T>(options, config);
+    } catch (err) {
+      if (!shouldRetryStage(err, signal)) throw err;
+      console.warn(`[runLLMResumeAnalysisStream] Stage ${stageTag} failed, retrying...`, err);
+      try {
+        return await chatCompletionJSON<T>(options, config);
+      } catch (retryErr) {
+        console.warn(`[runLLMResumeAnalysisStream] ${stageLabel} failed:`, retryErr);
+        throw retryErr;
+      }
     }
   }
+
+  // Stage 1: JD analysis with one retry; propagate failures.
+  onStageUpdate?.({ stage: "jd-analysis", status: "start" });
+  const jd = await runStageWithRetry<JDAnalysisResult>(
+    "1 (jd-analysis)",
+    "JD analysis",
+    {
+      system: RESUME_AGENT_SYSTEM_PROMPT,
+      user: buildAnalyzeCorePrompt(input),
+      maxTokens: 3000,
+      schema: jdAnalysisResponseSchema,
+      signal,
+    }
+  );
+  const jdData = jd.jdAnalysis;
 
   onStageUpdate?.({
     stage: "jd-analysis",
@@ -117,37 +115,17 @@ export async function runLLMResumeAnalysisStream(
 
   // Stage 2: Diagnosis and match with one retry; propagate failures.
   onStageUpdate?.({ stage: "diagnosis", status: "start" });
-  let diagnosisMatchData: DiagnosisMatchResult;
-  try {
-    diagnosisMatchData = await chatCompletionJSON<DiagnosisMatchResult>(
-      {
-        system: RESUME_AGENT_SYSTEM_PROMPT,
-        user: buildAnalyzeDiagnosisPrompt(input),
-        maxTokens: 4000,
-        schema: diagnosisMatchResponseSchema,
-        signal,
-      },
-      config
-    );
-  } catch (err) {
-    if (!shouldRetryStage(err, signal)) throw err;
-    console.warn("[runLLMResumeAnalysisStream] Stage 2 (diagnosis) failed, retrying...", err);
-    try {
-      diagnosisMatchData = await chatCompletionJSON<DiagnosisMatchResult>(
-        {
-          system: RESUME_AGENT_SYSTEM_PROMPT,
-          user: buildAnalyzeDiagnosisPrompt(input),
-          maxTokens: 4000,
-          schema: diagnosisMatchResponseSchema,
-          signal,
-        },
-        config
-      );
-    } catch (retryErr) {
-      console.warn("[runLLMResumeAnalysisStream] Diagnosis failed:", retryErr);
-      throw retryErr;
+  const diagnosisMatchData = await runStageWithRetry<DiagnosisMatchResult>(
+    "2 (diagnosis)",
+    "Diagnosis",
+    {
+      system: RESUME_AGENT_SYSTEM_PROMPT,
+      user: buildAnalyzeDiagnosisPrompt(input),
+      maxTokens: 4000,
+      schema: diagnosisMatchResponseSchema,
+      signal,
     }
-  }
+  );
 
   const normalizedFollowUpQuestions = normalizeFollowUpQuestions(diagnosisMatchData.followUpQuestions);
 
@@ -165,72 +143,30 @@ export async function runLLMResumeAnalysisStream(
 
   // Publish each successful parallel stage even if the other stage fails.
   onStageUpdate?.({ stage: "optimize", status: "start" });
-  const optimizeTask = (async (): Promise<OptimizeResumeResult> => {
-    try {
-      return await chatCompletionJSON<OptimizeResumeResult>(
-        {
-          system: RESUME_AGENT_SYSTEM_PROMPT,
-          user: buildAnalyzeOutputPrompt(input, optimizeStyle, coreSummary),
-          maxTokens: 4500,
-          schema: optimizeResumeResponseSchema,
-          signal,
-        },
-        config
-      );
-    } catch (err) {
-      if (!shouldRetryStage(err, signal)) throw err;
-      console.warn("[runLLMResumeAnalysisStream] Stage 3 (optimize) failed, retrying...", err);
-      try {
-        return await chatCompletionJSON<OptimizeResumeResult>(
-          {
-            system: RESUME_AGENT_SYSTEM_PROMPT,
-            user: buildAnalyzeOutputPrompt(input, optimizeStyle, coreSummary),
-            maxTokens: 4500,
-            schema: optimizeResumeResponseSchema,
-            signal,
-          },
-          config
-        );
-      } catch (retryErr) {
-        console.warn("[runLLMResumeAnalysisStream] Optimization failed:", retryErr);
-        throw retryErr;
-      }
+  const optimizeTask = runStageWithRetry<OptimizeResumeResult>(
+    "3 (optimize)",
+    "Optimization",
+    {
+      system: RESUME_AGENT_SYSTEM_PROMPT,
+      user: buildAnalyzeOutputPrompt(input, optimizeStyle, coreSummary),
+      maxTokens: 4500,
+      schema: optimizeResumeResponseSchema,
+      signal,
     }
-  })();
+  );
 
   onStageUpdate?.({ stage: "interview", status: "start" });
-  const interviewTask = (async (): Promise<InterviewResult> => {
-    try {
-      return await chatCompletionJSON<InterviewResult>(
-        {
-          system: RESUME_AGENT_SYSTEM_PROMPT,
-          user: buildAnalyzeInterviewPrompt(input, coreSummary),
-          maxTokens: 3500,
-          schema: interviewResponseSchema,
-          signal,
-        },
-        config
-      );
-    } catch (err) {
-      if (!shouldRetryStage(err, signal)) throw err;
-      console.warn("[runLLMResumeAnalysisStream] Stage 4 (interview) failed, retrying...", err);
-      try {
-        return await chatCompletionJSON<InterviewResult>(
-          {
-            system: RESUME_AGENT_SYSTEM_PROMPT,
-            user: buildAnalyzeInterviewPrompt(input, coreSummary),
-            maxTokens: 3500,
-            schema: interviewResponseSchema,
-            signal,
-          },
-          config
-        );
-      } catch (retryErr) {
-        console.warn("[runLLMResumeAnalysisStream] Interview preparation failed:", retryErr);
-        throw retryErr;
-      }
+  const interviewTask = runStageWithRetry<InterviewResult>(
+    "4 (interview)",
+    "Interview preparation",
+    {
+      system: RESUME_AGENT_SYSTEM_PROMPT,
+      user: buildAnalyzeInterviewPrompt(input, coreSummary),
+      maxTokens: 3500,
+      schema: interviewResponseSchema,
+      signal,
     }
-  })();
+  );
 
   const [optimizeSettled, interviewSettled] = await Promise.allSettled([
     optimizeTask.then((optimizeResume) => {

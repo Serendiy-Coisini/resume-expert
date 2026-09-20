@@ -3,7 +3,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useLegoDesignerStore } from '@/store/lego-designer-store';
 import { X, Save, Tag, FileText, Loader2 } from 'lucide-react';
-import html2canvas from 'html2canvas';
 
 interface SaveTemplateDialogProps {
   open: boolean;
@@ -11,8 +10,9 @@ interface SaveTemplateDialogProps {
 }
 
 export const SaveTemplateDialog: React.FC<SaveTemplateDialogProps> = ({ open, onClose }) => {
-  const { schema, saveAsTemplate } = useLegoDesignerStore();
-  const savedTemplates = useLegoDesignerStore(s => s.savedTemplates);
+  const schemaTitle = useLegoDesignerStore((s) => s.schema.config?.title);
+  const saveAsTemplate = useLegoDesignerStore((s) => s.saveAsTemplate);
+  const savedTemplates = useLegoDesignerStore((s) => s.savedTemplates);
 
   const [name, setName] = useState('');
   const [category, setCategory] = useState('个人自定义');
@@ -32,13 +32,13 @@ export const SaveTemplateDialog: React.FC<SaveTemplateDialogProps> = ({ open, on
 
   useEffect(() => {
     if (open) {
-      setName(schema.config?.title || '我的自定义模板');
+      setName(schemaTitle || '我的自定义模板');
       setCategory('个人自定义');
       setDescription('');
       setCustomCategory('');
       setShowCustomInput(false);
     }
-  }, [open, schema.config?.title]);
+  }, [open, schemaTitle]);
 
   if (!open) return null;
 
@@ -49,6 +49,7 @@ export const SaveTemplateDialog: React.FC<SaveTemplateDialogProps> = ({ open, on
         document.querySelector('[data-page-padding]')) as HTMLElement;
       if (!canvasEl) return '';
 
+      const { default: html2canvas } = await import('html2canvas');
       const canvasPromise = html2canvas(canvasEl, {
         scale: 0.25,
         useCORS: true,

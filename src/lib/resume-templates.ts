@@ -1,4 +1,5 @@
 import type { FinalResume } from "@/types/resume";
+import { sanitizePrintHTML } from "@/lib/safe-html";
 
 export type TemplateId =
   | "modern-sidebar"
@@ -341,10 +342,12 @@ export function compileCustomTemplate(
     )
     .join(" ");
 
-  let tpl = (htmlTemplate || "")
-    .replace(/```html\s*/gi, "")
-    .replace(/```\s*/g, "")
-    .trim();
+  let tpl = sanitizePrintHTML(
+    (htmlTemplate || "")
+      .replace(/```html\s*/gi, "")
+      .replace(/```\s*/g, "")
+      .trim()
+  );
 
   // Fallback: If template doesn't contain HTML tags, wrap it properly into readable HTML layout
   if (!tpl || (!tpl.includes("<html") && !tpl.includes("<div") && !tpl.includes("<body") && !tpl.includes("<p"))) {
