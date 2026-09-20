@@ -1,6 +1,7 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useShallow } from "zustand/react/shallow";
 import Link from "next/link";
 import {
   AlertCircle,
@@ -34,6 +35,8 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { SectionTitle } from "@/components/shared/ui-helpers";
 import { runResumeAnalysisStream } from "@/services/ai/resumeAgent";
+import { useInputTask } from "@/lib/use-input-task";
+import { anonymizePayload } from "@/lib/privacy/pii";
 import { useResumeStore } from "@/store/resume-store";
 import { getAIHeaders, useAIConfigStore } from "@/store/ai-config-store";
 import { renderPdfPagesToImages } from "@/lib/pdf-to-images";
@@ -54,6 +57,8 @@ const STAGE_STEPS = [
 ];
 
 export function InputStep() {
+  const startResumeUpload = useInputTask();
+  const startJdUpload = useInputTask();
   const {
     userInput,
     setUserInput,
@@ -71,15 +76,17 @@ export function InputStep() {
     analysisStage,
     setAnalysisStage,
     updatePartialAnalysisResult,
-  } = useResumeStore();
+  } = useResumeStore(useShallow((state) => ({ userInput: state.userInput, setUserInput: state.setUserInput, loadExampleData: state.loadExampleData, analysisResult: state.analysisResult, setAnalysisResult: state.setAnalysisResult, setAnalyzing: state.setAnalyzing, setAnalysisError: state.setAnalysisError, setAiMode: state.setAiMode, isAnalyzing: state.isAnalyzing, analysisError: state.analysisError, setCurrentStep: state.setCurrentStep, enablePIIMasking: state.enablePIIMasking, setEnablePIIMasking: state.setEnablePIIMasking, analysisStage: state.analysisStage, setAnalysisStage: state.setAnalysisStage, updatePartialAnalysisResult: state.updatePartialAnalysisResult })));
 
   const abortControllerRef = useRef<AbortController | null>(null);
+  useEffect(() => () => abortControllerRef.current?.abort(), []);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const jdFileInputRef = useRef<HTMLInputElement | null>(null);
   const avatarInputRef = useRef<HTMLInputElement | null>(null);
   const dragCounter = useRef(0);
   const jdDragCounter = useRef(0);
 
+  const startAvatarUpload = useInputTask();
   const [uploadingPdf, setUploadingPdf] = useState(false);
   const [pdfError, setPdfError] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
@@ -101,6 +108,7 @@ export function InputStep() {
   };
 
   const processJdFile = async (file: File) => {
+    const task = startJdUpload();
     setUploadingJd(true);
     setJdErrorMsg(null);
     setJdSuccessMsg(null);
@@ -110,7 +118,7 @@ export function InputStep() {
       formData.append("file", file);
 
       const res = await fetch("/api/parse-jd-image", {
-        method: "POST",
+        method: "POST", signal: task.signal,
         headers: getAIHeaders(),
         body: formData,
       });
@@ -120,6 +128,7 @@ export function InputStep() {
         throw new Error(data.error || "识别 JD 图片/文件失败");
       }
 
+      if (!task.isCurrent()) return;
       if (data.text) {
         setUserInput({ jobDescription: data.text });
 
@@ -138,8 +147,11 @@ export function InputStep() {
         }
       }
     } catch (err) {
+      if (!task.canReportError()) return;
       setJdErrorMsg(err instanceof Error ? err.message : "识别 JD 图片/文件失败，请重试或直接粘贴文本");
     } finally {
+      if (!task.owns()) return;
+      task.finish();
       setUploadingJd(false);
       if (jdFileInputRef.current) {
         jdFileInputRef.current.value = "";
@@ -193,8 +205,14 @@ export function InputStep() {
     const file = e.target.files?.[0];
     if (!file) return;
 
+    const task = startAvatarUpload();
+    const startedAvatar = useResumeStore.getState().userInput.avatarUrl;
     const reader = new FileReader();
+    task.signal.addEventListener("abort", () => reader.abort(), { once: true });
+    reader.onloadend = () => task.finish();
     reader.onload = (event) => {
+      if (!task.isCurrent() || useResumeStore.getState().userInput.avatarUrl !== startedAvatar) return;
+      const analysisResult = useResumeStore.getState().analysisResult;
       const base64 = event.target?.result as string;
       if (base64) {
         setUserInput({ avatarUrl: base64 });
@@ -269,6 +287,7 @@ export function InputStep() {
       return;
     }
 
+    const task = startResumeUpload();
     setUploadingPdf(true);
     setPdfError(null);
 
@@ -292,7 +311,7 @@ export function InputStep() {
         });
 
         const res = await fetch("/api/parse-resume-image", {
-          method: "POST",
+          method: "POST", signal: task.signal,
           headers: {
             "Content-Type": "application/json",
             ...getAIHeaders(),
@@ -310,25 +329,26 @@ export function InputStep() {
         formData.append("file", file);
 
         const res = await fetch("/api/parse-pdf", {
-          method: "POST",
+          method: "POST", signal: task.signal,
           body: formData,
         });
 
         const data = await res.json();
 
+        if (!res.ok) throw new Error(data.error || "PDF 解析失败");
         if (res.ok && data.text && data.text.trim().length >= 20) {
           extractedText = data.text;
         } else if (data.isScannedPdf || !data.text || data.text.trim().length < 20) {
           // Vector/Scanned PDF fallback -> render pages to images and run Vision/OCR
           const pageImages = await renderPdfPagesToImages(file, 4, (total) => {
             setPdfError(`该 PDF 共 ${total} 页，当前 OCR 最多处理前 4 页；请确认后续页面没有关键经历。`);
-          });
+          }, task.signal);
           if (!pageImages || pageImages.length === 0) {
             throw new Error("未能从 PDF 中提取出有效页面图像");
           }
 
           const visionRes = await fetch("/api/parse-resume-image", {
-            method: "POST",
+            method: "POST", signal: task.signal,
             headers: {
               "Content-Type": "application/json",
               ...getAIHeaders(),
@@ -349,7 +369,7 @@ export function InputStep() {
         formData.append("file", file);
 
         const res = await fetch("/api/parse-pdf", {
-          method: "POST",
+          method: "POST", signal: task.signal,
           body: formData,
         });
 
@@ -364,10 +384,14 @@ export function InputStep() {
         throw new Error("未能从文件中提取出有效文本，请确认文件内容或直接粘贴");
       }
 
+      if (!task.isCurrent()) return;
       setUserInput({ originalResume: extractedText });
     } catch (err) {
+      if (!task.canReportError()) return;
       setPdfError(err instanceof Error ? err.message : "解析文件失败，请直接粘贴文本");
     } finally {
+      if (!task.owns()) return;
+      task.finish();
       setUploadingPdf(false);
       if (fileInputRef.current) {
         fileInputRef.current.value = "";
@@ -446,7 +470,7 @@ export function InputStep() {
     try {
       const result = await runResumeAnalysisStream(
         userInput,
-        "ai-product",
+        useResumeStore.getState().optimizeStyle,
         {
           enablePIIMasking,
           onStageChange: (stageId, status) => {
@@ -496,7 +520,7 @@ export function InputStep() {
       });
 
       await new Promise((resolve) => setTimeout(resolve, 600));
-      setCurrentStep("jd-analysis");
+      if (isCurrentTask()) setCurrentStep("jd-analysis");
     } catch (error) {
       if (error instanceof DOMException && error.name === "AbortError") return;
       if (isCurrentTask()) {
@@ -535,7 +559,7 @@ export function InputStep() {
           <div>
             <span className="font-semibold text-emerald-950">AI 敏感隐私脱敏保护</span>
             <span className="ml-2 text-emerald-700">
-              开启后，识别到的手机号、邮箱及姓名会替换为占位符，图片使用本地 OCR。自动识别可能遗漏，请检查材料；关闭后图片和原始文本可能发送至所选模型服务商。
+              开启后，识别到的姓名、联系方式、地址及公司会替换为占位符，图片使用本地 OCR。自动识别可能遗漏或误判，请检查下方预览并手工移除敏感信息；关闭后图片和原始文本可能发送至所选模型服务商。
             </span>
           </div>
         </div>
@@ -549,6 +573,11 @@ export function InputStep() {
           <div className="w-9 h-5 bg-neutral-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-neutral-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-600"></div>
         </label>
       </div>
+
+      <details className="mb-4 text-xs text-slate-700">
+        <summary className="cursor-pointer">查看当前材料发送预览（{enablePIIMasking ? '已启用自动脱敏' : '原始文本'}）</summary>
+        <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap rounded border p-3">{JSON.stringify(anonymizePayload(userInput, enablePIIMasking).value, null, 2)}</pre>
+      </details>
 
       {analysisError && (
         <div className="mb-5 rounded-xl border border-red-200 bg-red-50/95 p-4 text-sm text-red-900 shadow-sm animate-in fade-in duration-200">

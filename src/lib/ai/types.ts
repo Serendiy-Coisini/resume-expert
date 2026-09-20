@@ -45,7 +45,7 @@ export interface AnalyzeResponseBody {
 
 export interface OptimizeResponseBody {
   optimizedItems: import("@/types/resume").OptimizedItem[];
-  finalResume?: import("@/types/resume").AnalysisResult["finalResume"];
+  finalResume: import("@/types/resume").AnalysisResult["finalResume"];
   mode: AIMode;
 }
 

@@ -10,6 +10,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useAIConfigStore } from "@/store/ai-config-store";
+import { isStorageVolatile } from "@/lib/safe-storage";
 
 const PROVIDERS = [
   {
@@ -83,6 +84,7 @@ export default function SettingsPage() {
 
   const [selectedProvider, setSelectedProvider] = useState<string | null>("deepseek");
   const [apiKey, setApiKey] = useState("");
+  const [serverAccessToken, setServerAccessToken] = useState("");
   const [customBaseUrl, setCustomBaseUrl] = useState("");
   const [customModel, setCustomModel] = useState("");
   const [showKey, setShowKey] = useState(false);
@@ -99,6 +101,7 @@ export default function SettingsPage() {
     if (!initialized && storedConfig) {
       if (storedConfig.providerId) setSelectedProvider(storedConfig.providerId);
       if (storedConfig.apiKey) setApiKey(storedConfig.apiKey);
+      setServerAccessToken(storedConfig.serverAccessToken || "");
       if (storedConfig.baseUrl) setCustomBaseUrl(storedConfig.baseUrl);
       if (storedConfig.model) setCustomModel(storedConfig.model);
       setInitialized(true);
@@ -137,6 +140,7 @@ export default function SettingsPage() {
       // 1. Reset client localStorage
       resetStoredConfig();
       setApiKey("");
+      setServerAccessToken("");
       setCustomBaseUrl("");
       setCustomModel("");
       setSelectedProvider("deepseek");
@@ -168,7 +172,9 @@ export default function SettingsPage() {
         provider: providerType,
       });
 
-      setSaved(true);
+      if (isStorageVolatile("resume_expert_user_ai_config")) {
+        setTestResult({ success: false, message: "配置仅在本次会话生效，浏览器存储写入失败，刷新后需要重新输入。" });
+      } else setSaved(true);
       setTimeout(() => setSaved(false), 4000);
     } catch {
       // ignore
@@ -206,11 +212,21 @@ export default function SettingsPage() {
           </p>
           <div className="mt-4 inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-xs font-medium">
             <ShieldCheck className="w-4 h-4 text-emerald-400" />
-            <span>纯客户端隔离存储：配置保存在您的本地浏览器中，下次访问自动加载生效，绝不上报或存储在服务器上</span>
+            <span>配置保存在当前浏览器；调用时经本应用服务端内存转发给所选模型服务商，不写入服务端磁盘。</span>
           </div>
         </div>
 
         {/* Step 1: Select Provider */}
+        <details className="mb-8 rounded-xl border border-slate-700 p-4 text-slate-200">
+          <summary className="cursor-pointer font-semibold">使用部署方的共享模型</summary>
+          <p className="my-3 text-sm text-slate-400">请向管理员获取个人服务访问口令。保存后使用服务器模型，并清空当前个人 API Key。</p>
+          <Input aria-label="服务访问口令" type="password" value={serverAccessToken} onChange={e => setServerAccessToken(e.target.value)} autoComplete="off" />
+          <Button className="mt-3" disabled={serverAccessToken.trim().length < 32} onClick={() => {
+            setStoredConfig({ apiKey: "", serverAccessToken: serverAccessToken.trim() });
+            setApiKey("");
+            setTestResult({ success: !isStorageVolatile("resume_expert_user_ai_config"), message: isStorageVolatile("resume_expert_user_ai_config") ? "口令仅本次会话有效，未能写入浏览器存储。" : "共享模型口令已保存，返回分析页面即可使用。" });
+          }}>保存服务访问口令</Button>
+        </details>
         <div className="mb-10">
           <h2 className="text-lg font-bold text-slate-100 mb-4 flex items-center gap-2">
             <span className="flex items-center justify-center w-7 h-7 rounded-full bg-blue-600 text-white text-sm font-bold">1</span>

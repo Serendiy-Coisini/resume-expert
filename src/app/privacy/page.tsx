@@ -29,7 +29,7 @@ export default function PrivacyPage() {
 
           <section className="space-y-2">
             <h2 className="text-lg font-bold text-slate-100 border-b border-slate-800 pb-2">2. PII 敏感信息脱敏保护</h2>
-            <p>系统内置自动 PII（Personally Identifiable Information）数据脱敏引擎。在向后端大模型发送请求前，可自动替换或遮蔽您的真实姓名、手机号码、电子邮箱、身份证号及详细住址等敏感数据，防止隐私信息被泄漏。</p>
+            <p>开启脱敏后，系统在发送模型请求前按规则替换识别到的姓名、电话、邮箱、身份证号、带标签的地址和公司名称。自动识别可能遗漏或误判，不保证覆盖全部个人信息；请在输入页检查发送预览，并手工删除不希望发送的内容。关闭脱敏后，原始文本和图片可能发送给所选模型服务商。图片本地 OCR 指在本应用服务器处理。</p>
           </section>
 
           <section className="space-y-2">

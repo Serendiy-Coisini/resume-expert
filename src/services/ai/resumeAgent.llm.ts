@@ -9,7 +9,6 @@ import {
   buildAnalyzeOutputPrompt,
   buildExtractTemplatePrompt,
   buildFollowUpBulletPrompt,
-  buildOptimizeUserPrompt,
   buildReoptimizeWithBulletsPrompt,
   normalizeAnalysisResult,
   normalizeFollowUpQuestions,
@@ -21,7 +20,6 @@ import {
   diagnosisMatchResponseSchema,
   interviewResponseSchema,
   jdAnalysisResponseSchema,
-  optimizedItemsResponseSchema,
   optimizeResumeResponseSchema,
 } from "@/lib/ai/schemas";
 import type { AnalysisResult, OptimizeStyle, UserInput } from "@/types/resume";
@@ -283,20 +281,20 @@ export async function runLLMRegenerateOptimizedItems(
   style: OptimizeStyle,
   config?: AIConfig,
   signal?: AbortSignal
-): Promise<{ optimizedItems: AnalysisResult["optimizedItems"] }> {
+): Promise<Pick<AnalysisResult, "optimizedItems" | "finalResume">> {
   try {
-    const raw = await chatCompletionJSON<{ optimizedItems: AnalysisResult["optimizedItems"] }>(
+    const raw = await chatCompletionJSON<OptimizeResumeResult>(
       {
         system: RESUME_AGENT_SYSTEM_PROMPT,
-        user: buildOptimizeUserPrompt(input, style),
+        user: buildAnalyzeOutputPrompt(input, style, "重新改写完整简历；保留原始事实和补充信息。"),
         temperature: 0.5,
         maxTokens: 4000,
-        schema: optimizedItemsResponseSchema,
+        schema: optimizeResumeResponseSchema,
         signal,
       },
       config
     );
-    return { optimizedItems: normalizeOptimizedItems(raw.optimizedItems) };
+    return { optimizedItems: normalizeOptimizedItems(raw.optimizedItems), finalResume: raw.finalResume };
   } catch (err) {
     console.warn("[runLLMRegenerateOptimizedItems] LLM call failed:", err);
     throw err;

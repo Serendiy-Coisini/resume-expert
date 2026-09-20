@@ -702,43 +702,19 @@ export function fillAiDataIntoExistingSchema(
 
   const finalResume = analysisResult?.finalResume;
   const name = finalResume?.personalInfo?.name || '求职者';
-  const jobIntent = finalResume?.jobIntent || userInput.targetRole || '软件工程师';
-  const email = finalResume?.personalInfo?.email || 'user@example.com';
-  const phone = finalResume?.personalInfo?.phone || '138-0000-0000';
-  const location = finalResume?.personalInfo?.location || '北京';
+  const jobIntent = finalResume?.jobIntent || userInput.targetRole || '';
+  const email = finalResume?.personalInfo?.email || '';
+  const phone = finalResume?.personalInfo?.phone || '';
+  const location = finalResume?.personalInfo?.location || '';
 
   const summary =
     finalResume?.summary ||
     userInput.additionalInfo ||
-    '具备扎实的专业基础与丰富的项目实践经验，善于解决复杂工程难题，注重团队协同与效率产出。';
+    '';
 
-  const workList = finalResume?.workExperience && finalResume.workExperience.length > 0
-    ? finalResume.workExperience
-    : [
-        {
-          company: '科技创新有限公司',
-          role: jobIntent,
-          period: '2022.03 - 至今',
-          bullets: [
-            '主导核心模块架构重构，提升业务处理吞吐量超过 35%。',
-            '跨团队协同推进项目落地，保障上线按时交付率达到 98%。'
-          ]
-        }
-      ];
+  const workList = finalResume?.workExperience ?? [];
 
-  const projectList = finalResume?.projectExperience && finalResume.projectExperience.length > 0
-    ? finalResume.projectExperience
-    : [
-        {
-          name: '高并发业务中台升级',
-          role: '核心研发工程师',
-          period: '2023.01 - 2023.08',
-          bullets: [
-            '设计实现分布缓存方案，压测 QPS 提升至 10,000+。',
-            '编写自动化测试套件，降低测试缺陷遗留率 40%。'
-          ]
-        }
-      ];
+  const projectList = finalResume?.projectExperience ?? [];
 
   const skills = (finalResume?.coreSkills && finalResume.coreSkills.length > 0)
     ? finalResume.coreSkills
@@ -746,12 +722,12 @@ export function fillAiDataIntoExistingSchema(
     ? finalResume.skillsAndTools
     : userInput.highlightSkills
     ? userInput.highlightSkills.split(/[,，\n]/).filter(Boolean)
-    : ['JavaScript / TypeScript', 'React / Next.js', 'Node.js', 'Tailwind CSS', 'Git'];
+    : [];
 
   const edu = finalResume?.education || {
-    school: '清华大学',
-    degree: '本科',
-    period: '2023.09 - 2027.06'
+    school: '',
+    degree: '',
+    period: ''
   };
 
   const avatarUrl = finalResume?.personalInfo?.avatarUrl || userInput.avatarUrl || '';
@@ -1454,43 +1430,19 @@ export function buildLegoSchemaFromResume(
   const finalResume = analysisResult?.finalResume;
 
   const name = finalResume?.personalInfo?.name || '求职者';
-  const jobIntent = finalResume?.jobIntent || userInput.targetRole || '软件工程师';
-  const email = finalResume?.personalInfo?.email || 'user@example.com';
-  const phone = finalResume?.personalInfo?.phone || '138-0000-0000';
-  const location = finalResume?.personalInfo?.location || '北京';
+  const jobIntent = finalResume?.jobIntent || userInput.targetRole || '';
+  const email = finalResume?.personalInfo?.email || '';
+  const phone = finalResume?.personalInfo?.phone || '';
+  const location = finalResume?.personalInfo?.location || '';
 
   const summary =
     finalResume?.summary ||
     userInput.additionalInfo ||
-    '具备扎实的专业基础与丰富的项目实践经验，善于解决复杂工程难题，注重团队协同与效率产出。';
+    '';
 
-  const workList = finalResume?.workExperience && finalResume.workExperience.length > 0
-    ? finalResume.workExperience
-    : [
-        {
-          company: '科技创新有限公司',
-          role: jobIntent,
-          period: '2022.03 - 至今',
-          bullets: [
-            '主导核心模块架构重构，提升业务处理吞吐量超过 35%。',
-            '跨团队协同推进项目落地，保障上线按时交付率达到 98%。'
-          ]
-        }
-      ];
+  const workList = finalResume?.workExperience ?? [];
 
-  const projectList = finalResume?.projectExperience && finalResume.projectExperience.length > 0
-    ? finalResume.projectExperience
-    : [
-        {
-          name: '高并发业务中台升级',
-          role: '核心研发工程师',
-          period: '2023.01 - 2023.08',
-          bullets: [
-            '设计实现分布缓存方案，压测 QPS 提升至 10,000+。',
-            '编写自动化测试套件，降低测试缺陷遗留率 40%。'
-          ]
-        }
-      ];
+  const projectList = finalResume?.projectExperience ?? [];
 
   const skills = (finalResume?.coreSkills && finalResume.coreSkills.length > 0)
     ? finalResume.coreSkills
@@ -1498,12 +1450,12 @@ export function buildLegoSchemaFromResume(
     ? finalResume.skillsAndTools
     : userInput.highlightSkills
     ? userInput.highlightSkills.split(/[,，\n]/).filter(Boolean)
-    : ['JavaScript / TypeScript', 'React / Next.js', 'Node.js', 'Tailwind CSS', 'Git'];
+    : [];
 
   const edu = finalResume?.education || {
-    school: '清华大学',
-    degree: '本科',
-    period: '2023.09 - 2027.06'
+    school: '',
+    degree: '',
+    period: ''
   };
 
 

@@ -1,11 +1,8 @@
 import { z } from "zod";
+import { readLimitedBody } from "@/lib/limited-body";
 
-export class RequestValidationError extends Error {
-  constructor(message: string, readonly status = 400) {
-    super(message);
-    this.name = "RequestValidationError";
-  }
-}
+import { RequestValidationError } from "@/lib/request-error";
+export { RequestValidationError } from "@/lib/request-error";
 
 const shortText = z.string().trim().max(300);
 const longText = z.string().max(50_000);
@@ -69,7 +66,7 @@ export async function parseJSONBody<T>(
 ): Promise<T> {
   const declaredLength = Number(request.headers.get("content-length") || 0);
   if (declaredLength > maxBytes) throw new RequestValidationError("请求内容过大", 413);
-  const raw = await request.text();
+  const raw = new TextDecoder().decode(await readLimitedBody(request, maxBytes));
   if (new TextEncoder().encode(raw).byteLength > maxBytes) {
     throw new RequestValidationError("请求内容过大", 413);
   }

@@ -6,7 +6,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint",
+    "lint": "eslint src scripts/document-worker.cjs --no-cache",
     "test": "node scripts/run-tests.cjs",
     "typecheck": "tsc --noEmit --incremental false",
     "dev:resume-design": "cd resume-design-main && pnpm dev",

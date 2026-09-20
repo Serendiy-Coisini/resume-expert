@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getAIConfig } from "@/lib/ai/config";
-import { LLMError } from "@/lib/ai/client";
-import { applyFollowUpRequestSchema, parseJSONBody, RequestValidationError } from "@/lib/ai/request-validation";
+import { aiErrorResponse } from "@/lib/ai/error-response";
+import { applyFollowUpRequestSchema, parseJSONBody } from "@/lib/ai/request-validation";
 import { rateLimitResponse } from "@/lib/rate-limit";
 import { reoptimizeWithBulletsServer } from "@/services/ai/resumeAgent.server";
 
@@ -26,11 +26,6 @@ export async function POST(request: Request) {
     );
     return NextResponse.json({ optimizedItems, finalResume, mode });
   } catch (error) {
-    if (error instanceof RequestValidationError) {
-      return NextResponse.json({ error: error.message }, { status: error.status });
-    }
-    const message =
-      error instanceof LLMError ? error.message : "应用追问结果失败，请稍后重试";
-    return NextResponse.json({ error: message }, { status: 500 });
+    return aiErrorResponse(error, "应用追问结果失败，请稍后重试");
   }
 }

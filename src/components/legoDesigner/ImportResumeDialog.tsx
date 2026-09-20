@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { useLegoDesignerStore } from '@/store/lego-designer-store';
+import { useInputTask } from '@/lib/use-input-task';
 import { useResumeStore } from '@/store/resume-store';
 import { PRESET_RESUMES, type PresetResumeItem } from '@/lib/preset-resumes';
 import { parseResumeFromText } from '@/lib/resume-parser';
@@ -133,6 +134,7 @@ export const ImportResumeDialog: React.FC<ImportResumeDialogProps> = ({ open, on
   });
 
   const [rawText, setRawText] = useState<string>('');
+  const startUpload = useInputTask(open, rawText + JSON.stringify(resumeData));
   const [isParsing, setIsParsing] = useState<boolean>(false);
   const [parseStatus, setParseStatus] = useState<{
     type: 'success' | 'error' | 'info';
@@ -378,6 +380,7 @@ export const ImportResumeDialog: React.FC<ImportResumeDialogProps> = ({ open, on
     const isImage = file.type.startsWith('image/') || /\.(png|jpe?g|webp|bmp)$/i.test(fileName);
     const isPdf = fileName.endsWith('.pdf') || file.type === 'application/pdf';
 
+    const task = startUpload();
     setIsParsing(true);
     setParseStatus({
       type: 'info',
@@ -402,7 +405,7 @@ export const ImportResumeDialog: React.FC<ImportResumeDialogProps> = ({ open, on
         });
 
         const res = await fetch('/api/parse-resume-image', {
-          method: 'POST',
+          method: 'POST', signal: task.signal,
           headers: {
             'Content-Type': 'application/json',
             ...getAIHeaders(),
@@ -420,11 +423,12 @@ export const ImportResumeDialog: React.FC<ImportResumeDialogProps> = ({ open, on
         const formData = new FormData();
         formData.append('file', file);
         const res = await fetch('/api/parse-pdf', {
-          method: 'POST',
+          method: 'POST', signal: task.signal,
           body: formData
         });
         const data = await res.json();
 
+        if (!res.ok) throw new Error(data.error || "PDF 解析失败");
         if (res.ok && data.text && data.text.trim().length >= 20) {
           extractedText = data.text;
         } else if (data.isScannedPdf || !data.text || data.text.trim().length < 20) {
@@ -436,13 +440,13 @@ export const ImportResumeDialog: React.FC<ImportResumeDialogProps> = ({ open, on
 
           const pageImages = await renderPdfPagesToImages(file, 4, (total) => {
             showToast('info', `该 PDF 共 ${total} 页，当前 OCR 仅处理前 4 页`);
-          });
+          }, task.signal);
           if (!pageImages || pageImages.length === 0) {
             throw new Error('未能从 PDF 中提取出有效页面图像');
           }
 
           const visionRes = await fetch('/api/parse-resume-image', {
-            method: 'POST',
+            method: 'POST', signal: task.signal,
             headers: {
               'Content-Type': 'application/json',
               ...getAIHeaders(),
@@ -462,7 +466,7 @@ export const ImportResumeDialog: React.FC<ImportResumeDialogProps> = ({ open, on
         const formData = new FormData();
         formData.append('file', file);
         const res = await fetch('/api/parse-pdf', {
-          method: 'POST',
+          method: 'POST', signal: task.signal,
           body: formData
         });
         const data = await res.json();
@@ -479,6 +483,7 @@ export const ImportResumeDialog: React.FC<ImportResumeDialogProps> = ({ open, on
         throw new Error('未能从文件中提取出有效文本');
       }
 
+      if (!task.isCurrent()) return;
       setRawText(extractedText);
       const { finalResume: parsed, userInput: parsedInput, stats } = parseResumeFromText(extractedText);
       setResumeData(parsed);
@@ -490,12 +495,15 @@ export const ImportResumeDialog: React.FC<ImportResumeDialogProps> = ({ open, on
       });
       showToast('success', `已成功解析并提取文件「${file.name}」！`);
     } catch (err) {
+      if (!task.canReportError()) return;
       setParseStatus({
         type: 'error',
         message: err instanceof Error ? `文件解析失败：${err.message}` : '文件解析失败，请重试'
       });
       showToast('error', '文件解析失败，请检查格式');
     } finally {
+      if (!task.owns()) return;
+      task.finish();
       setIsParsing(false);
       if (e.target) e.target.value = '';
     }

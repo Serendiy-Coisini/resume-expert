@@ -1,3 +1,5 @@
+import { useInputTask } from "@/lib/use-input-task";
+import { useShallow } from "zustand/react/shallow";
 import { useMemo, useRef, useState } from "react";
 import {
   Camera,
@@ -55,7 +57,8 @@ export function ExportStep() {
     copied,
     setCopied,
     setCurrentStep,
-  } = useResumeStore();
+  } = useResumeStore(useShallow((state) => ({ userInput: state.userInput, setUserInput: state.setUserInput, analysisResult: state.analysisResult, setAnalysisResult: state.setAnalysisResult, selectedTemplate: state.selectedTemplate, setSelectedTemplate: state.setSelectedTemplate, templateOptions: state.templateOptions, customTemplateHTML: state.customTemplateHTML, copied: state.copied, setCopied: state.setCopied, setCurrentStep: state.setCurrentStep })));
+  const startAvatarUpload = useInputTask();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [viewMode, setViewMode] = useState<"standard" | "compare" | "lego">("standard");
   const [compareLeftTab, setCompareLeftTab] = useState<"file" | "text">("file");
@@ -94,11 +97,19 @@ export function ExportStep() {
     const file = e.target.files?.[0];
     if (!file) return;
 
+    const task = startAvatarUpload();
+    const startedAvatar = useResumeStore.getState().userInput.avatarUrl;
     const reader = new FileReader();
+    task.signal.addEventListener("abort", () => reader.abort(), { once: true });
+    reader.onloadend = () => task.finish();
     reader.onload = (event) => {
+      if (!task.isCurrent() || useResumeStore.getState().userInput.avatarUrl !== startedAvatar) return;
+      const analysisResult = useResumeStore.getState().analysisResult;
       const base64 = event.target?.result as string;
       if (base64) {
         setUserInput({ avatarUrl: base64 });
+        if (!analysisResult) return;
+        const { finalResume, englishResume } = analysisResult;
         setAnalysisResult({
           ...analysisResult,
           finalResume: {

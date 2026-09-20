@@ -36,7 +36,8 @@ function isCanvasBlank(canvas: HTMLCanvasElement): boolean {
 export async function renderPdfPagesToImages(
   fileOrBuffer: File | ArrayBuffer | Uint8Array,
   maxPages = 4,
-  onTruncated?: (totalPages: number, processedPages: number) => void
+  onTruncated?: (totalPages: number, processedPages: number) => void,
+  signal?: AbortSignal
 ): Promise<string[]> {
   if (typeof window === 'undefined') {
     return [];
@@ -66,7 +67,11 @@ export async function renderPdfPagesToImages(
     isEvalSupported: false, // CVE-2024-4367: never compile PDF-provided font programs.
     disableFontFace: false,
   });
-
+  const effectiveSignal = signal ? AbortSignal.any([signal, AbortSignal.timeout(45_000)]) : AbortSignal.timeout(45_000);
+  const cancel = () => { void loadingTask.destroy().catch(() => {}); };
+  effectiveSignal.addEventListener('abort', cancel, { once: true });
+  try {
+  effectiveSignal.throwIfAborted();
   const pdfDoc = await loadingTask.promise;
   const totalPages = Math.min(pdfDoc.numPages, maxPages);
   if (pdfDoc.numPages > maxPages) onTruncated?.(pdfDoc.numPages, maxPages);
@@ -74,9 +79,13 @@ export async function renderPdfPagesToImages(
 
   try {
     for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
+      effectiveSignal.throwIfAborted();
       const page = await pdfDoc.getPage(pageNum);
     // 2.0x scale ensures crystal clear text for OCR / Vision models
-    const viewport = page.getViewport({ scale: 2.0 });
+    const base = page.getViewport({ scale: 1 });
+    const scale = Math.min(2, 6000 / base.width, 6000 / base.height, Math.sqrt(25_000_000 / (base.width * base.height)));
+    if (!Number.isFinite(scale) || scale < 0.1 || base.width <= 0 || base.height <= 0) throw new Error('PDF 页面尺寸过大或无效');
+    const viewport = page.getViewport({ scale });
 
     const canvas = document.createElement('canvas');
     canvas.width = viewport.width;
@@ -117,4 +126,8 @@ export async function renderPdfPagesToImages(
   }
 
   return images;
+  } finally {
+    effectiveSignal.removeEventListener('abort', cancel);
+    await loadingTask.destroy().catch(() => {});
+  }
 }

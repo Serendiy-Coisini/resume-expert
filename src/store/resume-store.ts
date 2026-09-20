@@ -62,6 +62,7 @@ interface ResumeStore {
   maxReachedStepIndex: number;
   sessionId: string;
   inputRevision: number;
+  resultRevision: number;
 
   setUserInput: (input: Partial<UserInput>) => void;
   setEnablePIIMasking: (enabled: boolean) => void;
@@ -73,7 +74,7 @@ interface ResumeStore {
   setCurrentStep: (step: StepId) => void;
   setAnalyzing: (analyzing: boolean) => void;
   setAnalysisResult: (result: AnalysisResult) => void;
-  patchAnalysisResult: (patch: Partial<AnalysisResult>, expectedSessionId?: string) => void;
+  patchAnalysisResult: (patch: Partial<AnalysisResult>, expectedSessionId?: string, expectedRevision?: number) => boolean;
   setAnalysisError: (error: string | null) => void;
   setAiMode: (mode: AIMode | null) => void;
   setOptimizeStyle: (style: OptimizeStyle) => void;
@@ -155,6 +156,7 @@ export const useResumeStore = create<ResumeStore>()(
       maxReachedStepIndex: 0,
       sessionId: createSessionId(),
       inputRevision: 0,
+      resultRevision: 0,
 
       setUserInput: (input) =>
         set((state) => {
@@ -202,6 +204,7 @@ export const useResumeStore = create<ResumeStore>()(
       setShowPageBreakGuide: (show) => set({ showPageBreakGuide: show }),
 
       loadExampleData: () => {
+        get().reset();
         revokeBlobUrl(get().userInput.rawFileDataUrl);
         set({
           userInput: {
@@ -287,13 +290,15 @@ Axure · Figma · Python (数据分析) · SQL · Prompt Optimization · LangCha
           return { isAnalyzing: analyzing };
         }),
 
-      setAnalysisResult: (result) => set({ analysisResult: result, partialAnalysisResult: null, analysisError: null }),
+      setAnalysisResult: (result) => set((state) => ({ analysisResult: result, partialAnalysisResult: null, analysisError: null, resultRevision: state.resultRevision + 1 })),
 
-      patchAnalysisResult: (patch, expectedSessionId) =>
-        set((state) => {
-          if (!state.analysisResult || (expectedSessionId && state.sessionId !== expectedSessionId)) return state;
-          return { analysisResult: { ...state.analysisResult, ...patch } };
-        }),
+      patchAnalysisResult: (patch, expectedSessionId, expectedRevision) => {
+        const state = get();
+        if (!state.analysisResult || (expectedSessionId && state.sessionId !== expectedSessionId) ||
+            (expectedRevision !== undefined && state.resultRevision !== expectedRevision)) return false;
+        set({ analysisResult: { ...state.analysisResult, ...patch }, resultRevision: state.resultRevision + 1 });
+        return true;
+      },
 
       setAnalysisError: (error) => set({ analysisError: error }),
 
@@ -309,6 +314,7 @@ Axure · Figma · Python (数据分析) · SQL · Prompt Optimization · LangCha
         set((state) => {
           if (!state.analysisResult) return state;
           return {
+            resultRevision: state.resultRevision + 1,
             analysisResult: {
               ...state.analysisResult,
               followUpQuestions: state.analysisResult.followUpQuestions.map((q) =>
@@ -322,6 +328,7 @@ Axure · Figma · Python (数据分析) · SQL · Prompt Optimization · LangCha
         set((state) => {
           if (!state.analysisResult) return state;
           return {
+            resultRevision: state.resultRevision + 1,
             analysisResult: {
               ...state.analysisResult,
               followUpQuestions: state.analysisResult.followUpQuestions.map((q) =>
@@ -362,6 +369,7 @@ Axure · Figma · Python (数据分析) · SQL · Prompt Optimization · LangCha
         archiveIfAvailable(get());
         revokeBlobUrl(get().userInput.rawFileDataUrl);
         set({
+          resultRevision: get().resultRevision + 1,
           sessionId: session.id,
           inputRevision: get().inputRevision + 1,
           userInput: session.userInput,
@@ -441,3 +449,9 @@ Axure · Figma · Python (数据分析) · SQL · Prompt Optimization · LangCha
     }
   )
 );
+
+/** Identity of the content from which a canvas was built (not UI or follow-up drafts). */
+export function getResumeSourceKey(): string {
+  const { sessionId, analysisResult, userInput } = useResumeStore.getState();
+  return JSON.stringify([sessionId, analysisResult?.finalResume ?? userInput]);
+}

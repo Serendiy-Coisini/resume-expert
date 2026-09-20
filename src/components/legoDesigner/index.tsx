@@ -4,7 +4,7 @@ import { LeftComList } from './LeftComList';
 import { LegoCanvas } from './LegoCanvas';
 import { RightSetter } from './RightSetter';
 import { useLegoDesignerStore } from '@/store/lego-designer-store';
-import { useResumeStore } from '@/store/resume-store';
+import { getResumeSourceKey, useResumeStore } from '@/store/resume-store';
 import { buildLegoSchemaFromResume } from '@/lib/lego-adapter';
 import { Layout, PlusCircle, Settings } from 'lucide-react';
 import { useShallow } from 'zustand/react/shallow';
@@ -20,8 +20,8 @@ export const LegoDesigner: React.FC<LegoDesignerProps> = ({
   isFullScreen: propIsFullScreen,
   onToggleFullScreen: propOnToggleFullScreen,
 }) => {
-  const { schema, setSchema, setScale } = useLegoDesignerStore(useShallow((state) => ({
-    schema: state.schema, setSchema: state.setSchema, setScale: state.setScale,
+  const { schema, setSchema, setScale, sourceKey } = useLegoDesignerStore(useShallow((state) => ({
+    schema: state.schema, setSchema: state.setSchema, setScale: state.setScale, sourceKey: state.sourceKey,
   })));
   const { userInput, analysisResult, selectedTemplate, templateOptions, customTemplateHTML } = useResumeStore(useShallow((state) => ({
     userInput: state.userInput,
@@ -29,6 +29,7 @@ export const LegoDesigner: React.FC<LegoDesignerProps> = ({
     selectedTemplate: state.selectedTemplate,
     templateOptions: state.templateOptions,
     customTemplateHTML: state.customTemplateHTML,
+    sessionId: state.sessionId,
   })));
 
   const [internalFullScreen, setInternalFullScreen] = useState(false);
@@ -55,9 +56,12 @@ export const LegoDesigner: React.FC<LegoDesignerProps> = ({
 
   const containerRef = useRef<HTMLDivElement>(null);
   const lastTemplateRef = useRef<string | null>(null);
+  const currentSourceKey = getResumeSourceKey();
+  const staleCanvas = schema.componentsTree.some((page) => page.children?.length) && sourceKey !== currentSourceKey;
 
   // Initialize or re-template schema only when appropriate (first load, empty canvas, or explicit layout template change)
   useEffect(() => {
+    if (staleCanvas) return;
     const currentChildren = schema.componentsTree?.[0]?.children || [];
     const isTemplateChanged = lastTemplateRef.current !== null && lastTemplateRef.current !== selectedTemplate;
 
@@ -159,6 +163,20 @@ export const LegoDesigner: React.FC<LegoDesignerProps> = ({
 
   return (
     <div ref={containerRef} className={containerClasses}>
+      {staleCanvas ? (
+        <div className="flex flex-col items-center justify-center gap-4 p-8 h-full text-slate-800 bg-slate-50">
+          <p className="font-semibold">当前简历已变化，原画布尚未同步。</p>
+          <p className="text-sm">同步会替换原画布的手工排版；可以先下载备份。</p>
+          <button className="rounded border px-4 py-2" onClick={() => {
+            const url = URL.createObjectURL(new Blob([JSON.stringify(schema)], { type: 'application/json' }));
+            const link = document.createElement('a'); link.href = url; link.download = '原画布备份.json'; link.click();
+            setTimeout(() => URL.revokeObjectURL(url), 1000);
+          }}>下载原画布备份</button>
+          <button className="rounded bg-indigo-600 text-white px-4 py-2" onClick={() => {
+            setSchema(buildLegoSchemaFromResume(userInput, analysisResult, selectedTemplate, templateOptions, customTemplateHTML), true);
+          }}>同步当前简历</button>
+        </div>
+      ) : <>
       <Toolbar
         isFullScreen={isFullScreen}
         onToggleFullScreen={toggleFullScreen}
@@ -244,6 +262,7 @@ export const LegoDesigner: React.FC<LegoDesignerProps> = ({
           />
         </div>
       </div>
+      </>}
     </div>
   );
 };

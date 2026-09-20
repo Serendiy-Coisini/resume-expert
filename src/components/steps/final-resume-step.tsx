@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useShallow } from "zustand/react/shallow";
 import { ChevronLeft, ChevronRight, Globe } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ResumeTemplateView } from "@/components/shared/resume-template-view";
@@ -11,7 +12,7 @@ import { isForeignCompany } from "@/lib/company-config";
 import { getOrBuildEnglishResume } from "@/lib/english-resume-builder";
 
 export function FinalResumeStep() {
-  const { userInput, analysisResult, selectedTemplate, setCurrentStep } = useResumeStore();
+  const { userInput, analysisResult, selectedTemplate, setCurrentStep } = useResumeStore(useShallow((state) => ({ userInput: state.userInput, analysisResult: state.analysisResult, selectedTemplate: state.selectedTemplate, setCurrentStep: state.setCurrentStep })));
   const [activeLang, setActiveLang] = useState<"zh" | "en">("zh");
 
   if (!analysisResult || !analysisResult.finalResume) {

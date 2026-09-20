@@ -1,3 +1,4 @@
+import { useInputTask } from "@/lib/use-input-task";
 import React, { useState, useRef, useEffect } from 'react';
 import { useLegoDesignerStore } from '@/store/lego-designer-store';
 import { useResumeStore } from '@/store/resume-store';
@@ -43,6 +44,7 @@ export const PhotoManagerDialog: React.FC<PhotoManagerDialogProps> = ({ open, on
     '';
 
   const [avatarSrc, setAvatarSrc] = useState<string>(initialAvatarSrc);
+  const startAvatarUpload = useInputTask(open, avatarSrc);
   const [urlInput, setUrlInput] = useState<string>('');
   const [shape, setShape] = useState<AvatarShape>('rounded');
   const [sizePreset, setSizePreset] = useState<AvatarSizePreset>('1inch');
@@ -131,8 +133,12 @@ export const PhotoManagerDialog: React.FC<PhotoManagerDialogProps> = ({ open, on
       return;
     }
 
+    const task = startAvatarUpload();
     const reader = new FileReader();
+    task.signal.addEventListener("abort", () => reader.abort(), { once: true });
+    reader.onloadend = () => task.finish();
     reader.onload = (event) => {
+      if (!task.isCurrent()) return;
       const dataUrl = event.target?.result as string;
       if (dataUrl) {
         setAvatarSrc(dataUrl);

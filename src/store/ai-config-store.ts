@@ -4,6 +4,7 @@ import { useResumeStore } from "@/store/resume-store";
 import { safeBrowserStorage } from "@/lib/safe-storage";
 
 export interface UserAIConfig {
+  serverAccessToken?: string;
   apiKey: string;
   baseUrl: string;
   model: string;
@@ -97,7 +98,8 @@ export function getAIHeaders(): Record<string, string> {
   if (useAIConfigStore.getState().forceMock) return { ...privacyHeaders, "x-ai-mode": "mock" };
   const userConfig = getUserAIConfig();
   if (!userConfig || !userConfig.apiKey) {
-    return privacyHeaders;
+    const token = useAIConfigStore.getState().config.serverAccessToken?.trim();
+    return token ? { ...privacyHeaders, "x-server-access-token": token } : privacyHeaders;
   }
 
   return {

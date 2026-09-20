@@ -1,6 +1,7 @@
 "use client";
 
 import { ChevronLeft, ChevronRight, Printer } from "lucide-react";
+import { useShallow } from "zustand/react/shallow";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -17,7 +18,7 @@ import { useResumeStore } from "@/store/resume-store";
 import { exportFullAnalysisAsPDF } from "@/lib/export-analysis-pdf";
 
 export function MatchStep() {
-  const { userInput, analysisResult, setCurrentStep } = useResumeStore();
+  const { userInput, analysisResult, setCurrentStep } = useResumeStore(useShallow((state) => ({ userInput: state.userInput, analysisResult: state.analysisResult, setCurrentStep: state.setCurrentStep })));
 
   if (!analysisResult || !analysisResult.matchItems) {
     return (

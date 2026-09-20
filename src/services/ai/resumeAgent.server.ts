@@ -45,14 +45,14 @@ export async function regenerateOptimizedItemsServer(
   signal?: AbortSignal
 ): Promise<{
   optimizedItems: AnalysisResult["optimizedItems"];
-  finalResume?: AnalysisResult["finalResume"];
+  finalResume: AnalysisResult["finalResume"];
   mode: AIMode;
 }> {
   const mode = currentMode(config);
 
   if (mode === "llm") {
-    const { optimizedItems } = await runLLMRegenerateOptimizedItems(input, style, config, signal);
-    return { optimizedItems, mode };
+    const { optimizedItems, finalResume } = await runLLMRegenerateOptimizedItems(input, style, config, signal);
+    return { optimizedItems, finalResume, mode };
   }
 
   const { optimizedItems, finalResume } = await runMockRegenerateOptimizedItems(input, style);

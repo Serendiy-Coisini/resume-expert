@@ -3,12 +3,15 @@ import { isIP } from "node:net";
 import { request as httpsRequest } from "node:https";
 import { request as httpRequest } from "node:http";
 import { validateAndSanitizeBaseUrl } from "@/lib/ai/ssrf";
+import { reserveServerCall } from "@/lib/ai/server-access";
 
 /** Resolve once, validate every answer, then pin the connection to that answer.
  * The original hostname is retained for Host and TLS certificate validation.
  * Redirects are deliberately returned to the caller, never followed.
  */
-export async function safeAIFetch(url: string, init: RequestInit): Promise<Response> {
+export async function safeAIFetch(url: string, init: RequestInit, access?: { serverPrincipal?: string }): Promise<Response> {
+  const release = reserveServerCall(access?.serverPrincipal);
+  try {
   const target = new URL(validateAndSanitizeBaseUrl(url));
   const hostname = target.hostname.replace(/^\[|\]$/g, "");
   const addresses = isIP(hostname)
@@ -22,7 +25,7 @@ export async function safeAIFetch(url: string, init: RequestInit): Promise<Respo
   const signal = init.signal ?? AbortSignal.timeout(60_000);
   signal.throwIfAborted();
   if (init.body != null && typeof init.body !== "string") throw new Error("模型请求必须为 JSON 文本");
-  return new Promise<Response>((resolve, reject) => {
+  return await new Promise<Response>((resolve, reject) => {
     const request = target.protocol === "https:" ? httpsRequest : httpRequest;
     const req = request(target, {
       method: init.method ?? "POST",
@@ -54,4 +57,5 @@ export async function safeAIFetch(url: string, init: RequestInit): Promise<Respo
     req.on("error", reject);
     req.end(init.body ?? undefined);
   });
+  } finally { release(); }
 }

@@ -1,5 +1,7 @@
 "use client";
 
+import { useShallow } from "zustand/react/shallow";
+
 import {
   Brain,
   CheckCircle2,
@@ -40,7 +42,7 @@ export function StepSidebar({
   isMobileDrawer?: boolean;
   onClose?: () => void;
 }) {
-  const { currentStep, setCurrentStep, getStepStatus, analysisResult } = useResumeStore();
+  const { currentStep, setCurrentStep, getStepStatus, analysisResult } = useResumeStore(useShallow((state) => ({ currentStep: state.currentStep, setCurrentStep: state.setCurrentStep, getStepStatus: state.getStepStatus, analysisResult: state.analysisResult, maxReachedStepIndex: state.maxReachedStepIndex, isAnalyzing: state.isAnalyzing })));
 
   const completedCount = STEPS.filter((step) => {
     const status = getStepStatus(step.id);

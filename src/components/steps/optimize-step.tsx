@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useShallow } from "zustand/react/shallow";
 import { ChevronLeft, ChevronRight, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -16,7 +17,7 @@ import {
 import { EmptyState, SectionTitle } from "@/components/shared/ui-helpers";
 import { useResumeStore } from "@/store/resume-store";
 import { regenerateOptimizedItems, STYLE_LABELS } from "@/services/ai/resumeAgent";
-import { updateFinalResumeWithOptimizedItems } from "@/lib/ai/prompts";
+
 import type { OptimizeStyle } from "@/types/resume";
 import { cn } from "@/lib/utils";
 
@@ -37,7 +38,9 @@ export function OptimizeStep() {
     patchAnalysisResult,
     setCurrentStep,
     sessionId,
-  } = useResumeStore();
+  } = useResumeStore(useShallow((state) => ({ analysisResult: state.analysisResult, userInput: state.userInput, optimizeStyle: state.optimizeStyle, setOptimizeStyle: state.setOptimizeStyle, patchAnalysisResult: state.patchAnalysisResult, setCurrentStep: state.setCurrentStep, sessionId: state.sessionId })));
+  const taskRef = useRef<AbortController | null>(null);
+  useEffect(() => () => taskRef.current?.abort(), []);
   const [regenerating, setRegenerating] = useState(false);
   const [optimizeError, setOptimizeError] = useState<string | null>(null);
 
@@ -52,23 +55,28 @@ export function OptimizeStep() {
   }
 
   const handleStyleChange = async (style: OptimizeStyle) => {
-    setOptimizeStyle(style);
+    const revision = useResumeStore.getState().resultRevision;
+    taskRef.current?.abort();
+    const task = new AbortController();
+    taskRef.current = task;
     const startedSessionId = sessionId;
     setRegenerating(true);
     setOptimizeError(null);
     try {
-      const { optimizedItems: items, finalResume: newFinalResume } = await regenerateOptimizedItems(userInput, style);
+      const additionalInfo = [userInput.additionalInfo, ...analysisResult.followUpQuestions.filter(q => q.userAnswer.trim()).map(q => `${q.purpose}：${q.userAnswer}`)].join("\n");
+      if (additionalInfo.length > 10_000) throw new Error("补充信息合计超过 10000 字，请精简后再切换风格，以免遗漏已确认的事实。");
+      const { optimizedItems: items, finalResume: newFinalResume } = await regenerateOptimizedItems({ ...userInput, additionalInfo }, style, task.signal);
       const currentResult = useResumeStore.getState().analysisResult;
       if (useResumeStore.getState().sessionId !== startedSessionId || !currentResult) return;
-      const updatedFinalResume =
-        newFinalResume ||
-        updateFinalResumeWithOptimizedItems(currentResult.finalResume, items);
-      patchAnalysisResult({
+      const committed = patchAnalysisResult({
         optimizedItems: items,
-        finalResume: updatedFinalResume,
+        finalResume: { ...newFinalResume, personalInfo: { ...newFinalResume.personalInfo, avatarUrl: currentResult.finalResume.personalInfo.avatarUrl } },
         englishResume: undefined,
-      }, startedSessionId);
+      }, startedSessionId, revision);
+      if (committed) setOptimizeStyle(style);
+      else setOptimizeError("简历已发生变化，请重新选择风格。");
     } catch (error) {
+      if (task.signal.aborted) return;
       setOptimizeError(error instanceof Error ? error.message : "优化生成失败");
     } finally {
       setRegenerating(false);

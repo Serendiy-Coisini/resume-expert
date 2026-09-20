@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import type { IHJSchema, IWidget, IWidgetCss, IWidgetDataSource } from '@/types/lego';
 import { normalizeLegoSchema } from '@/lib/schema-normalizer';
+import { getResumeSourceKey } from '@/store/resume-store';
 
 const TEMPLATES_STORAGE_KEY = 'LEGO_MY_TEMPLATES';
 
@@ -105,8 +106,8 @@ const saveTemplatesToStorage = (templates: SavedTemplate[]) => {
       localStorage.setItem(TEMPLATES_STORAGE_KEY, JSON.stringify(lightweight));
     } catch {
       try {
-        // Fallback 2: Strip all base64 covers and retain latest 10 templates
-        const stripped = templates.slice(0, 10).map((t) => ({
+        // Fallback 2: Strip covers without discarding any templates
+        const stripped = templates.map((t) => ({
           ...t,
           cover: '',
           previewUrl: ''
@@ -114,12 +115,14 @@ const saveTemplatesToStorage = (templates: SavedTemplate[]) => {
         localStorage.setItem(TEMPLATES_STORAGE_KEY, JSON.stringify(stripped));
       } catch (finalErr) {
         console.error('无法持久化模板至 localStorage：', finalErr);
+        throw new Error('模板未能保存到浏览器，请释放存储空间或导出 JSON 备份。');
       }
     }
   }
 };
 
 interface LegoDesignerState {
+  sourceKey: string | null;
   schema: IHJSchema;
   selectedWidgetId: string | null;
   selectedWidgetIds: string[];
@@ -189,6 +192,7 @@ export const useLegoDesignerStore = create<LegoDesignerState>((set, get) => {
   };
 
   return {
+    sourceKey: null,
     schema: deepClone(DEFAULT_LEGO_SCHEMA),
     selectedWidgetId: null,
     selectedWidgetIds: [],
@@ -209,9 +213,11 @@ export const useLegoDesignerStore = create<LegoDesignerState>((set, get) => {
     setSchema: (newSchema, saveHistory = true) => {
       const normalized = normalizeLegoSchema(newSchema);
       set((state) => {
-        const historyUpdate = saveHistory ? saveStateToHistory(state.schema) : {};
+        const historyUpdate = state.sourceKey !== getResumeSourceKey() ? { undoStack: [], redoStack: [] } : saveHistory ? saveStateToHistory(state.schema) : {};
         return {
           schema: normalized,
+          pageActiveIndex: 0,
+          sourceKey: getResumeSourceKey(),
           selectedWidgetId: null,
           selectedWidgetIds: [],
           ...historyUpdate
@@ -878,9 +884,11 @@ export const useLegoDesignerStore = create<LegoDesignerState>((set, get) => {
 
     resetSchema: (newSchema, saveHistory = true) => {
       const { schema } = get();
-      const historyUpdate = saveHistory ? saveStateToHistory(schema) : {};
+      const historyUpdate = get().sourceKey !== getResumeSourceKey() ? { undoStack: [], redoStack: [] } : saveHistory ? saveStateToHistory(schema) : {};
       set({
         schema: normalizeLegoSchema(newSchema || DEFAULT_LEGO_SCHEMA),
+        sourceKey: getResumeSourceKey(),
+        selectedWidgetIds: [],
         selectedWidgetId: null,
         pageActiveIndex: 0,
         ...historyUpdate
@@ -939,9 +947,10 @@ export const useLegoDesignerStore = create<LegoDesignerState>((set, get) => {
       if (!tpl) return;
       const targetSchema = tpl.schema || tpl.template_json;
       if (!targetSchema) return;
-      const historyUpdate = saveStateToHistory(schema);
+      const historyUpdate = get().sourceKey !== getResumeSourceKey() ? { undoStack: [], redoStack: [] } : saveStateToHistory(schema);
       set({
         schema: deepClone(normalizeLegoSchema(targetSchema)),
+        sourceKey: getResumeSourceKey(),
         selectedWidgetId: null,
         selectedWidgetIds: [],
         pageActiveIndex: 0,

@@ -40,7 +40,7 @@
 - 🎭 **Mock 演示与离线体验模式**
   - 未配置 API Key 时自动启动 Mock 模式，不消耗 Token、零费用，内置高保真专业简历范例，方便零门槛体验全流程。
 - 🔒 **Privacy-First 隐私安全**
-  - 敏感信息 (PII) 在发送模型前自动脱敏；页面配置的 API Key 仅持久化在当前浏览器，调用时经本应用服务端内存转发给所选模型服务商，不写入服务端磁盘。
+  - 开启隐私保护后，自动替换识别到的姓名、联系方式、公司、地址等信息，并提供发送预览。规则可能遗漏或误判，请人工核对；图片由本应用服务器 OCR 处理。页面配置的 API Key 仅持久化在当前浏览器，调用时经本应用服务端内存转发给所选模型服务商，不写入服务端磁盘。
 - 📄 **ATS 友好与多格式导出**
   - 支持导出文字可复制的 **PDF**、便于继续编辑的 **Word (.docx)** 内容版及 **纯文本格式**；实际 ATS 解析效果取决于模板和招聘系统。
 
@@ -131,8 +131,13 @@ npm run dev
 # 必填：您的 API Key
 LLM_API_KEY=sk-xxxx...
 
-# 显式允许服务端使用上述 Key；未开启时仍使用 Mock 模式
+# 默认关闭；开启共享 Key 必须同时配置以下访问控制
 ALLOW_SERVER_LLM_KEY=true
+SERVER_LLM_DEPLOYMENT=single-instance
+# 替换为独立随机口令，每名用户一个，每个 32–256 字符，最多 100 个
+SERVER_LLM_ACCESS_TOKENS=["replace-with-a-long-random-token-per-user"]
+SERVER_LLM_USER_DAILY_CALLS=40
+SERVER_LLM_TOTAL_DAILY_CALLS=200
 
 # 可选：API 服务 Base URL
 LLM_BASE_URL=https://api.deepseek.com/v1
@@ -143,6 +148,18 @@ LLM_MODEL=deepseek-chat
 # 可选：服务商 ID (deepseek | siliconflow | openai | moonshot | custom)
 LLM_PROVIDER=deepseek
 ```
+
+用户需要在「AI 配置 → 使用部署方的共享模型」保存管理员提供的个人访问口令。缺少口令、口令错误或未声明单实例部署时，共享 Key 请求会被拒绝；个人 BYOK 和显式 Mock 不受此限制。不要把真实口令提交到代码库。
+
+共享模型按实际上游请求计数（含重试），每日默认每人 40 次、总计 200 次，同时最多每人 2 个、全局 4 个请求。计数在单个 Node 进程内维护，UTC 日切换或进程重启会重置；这不是金额上限。请同时设置模型服务商的消费上限。多实例、集群和 Serverless 部署应保持 `ALLOW_SERVER_LLM_KEY=false`、使用 BYOK，直到接入共享鉴权和持久化配额服务。只有入口代理会覆盖客户端伪造的 IP 头时，才启用 `TRUST_PROXY_HEADERS=true`。
+
+### 文件解析部署与限制
+
+PDF、Word 和 OCR 在独立 Node 子进程处理：最多 2 个并发解析、4 个排队请求，排队与处理总计最多 45 秒；取消请求会终止子进程。生产部署须允许创建子进程，并保留 `scripts/document-worker.cjs`、根目录 `chi_sim.traineddata` 及完整生产依赖（推荐 `npm ci` 后 `npm run build && npm start`）。裁剪或 standalone 部署须验证解析依赖及字库完整；不支持创建子进程的平台需另部署解析服务。
+
+上传文件最多 15 MB，表单体最多 16 MB；图片 JSON 请求最多 21 MB，一次最多 4 张，累计解码后最多 15 MB。图片单边最多 12000 像素、总像素最多 2500 万，未知格式拒绝处理。PDF 文本解析最多 40 页，扫描件前端 OCR 最多前 4 页并提示；Word ZIP 声明解压大小最多 40 MB、2000 个文件。超限会明确报错。
+
+子进程的 192 MB 限制只约束 V8 堆，不能代替操作系统级内存限制（OCR/WASM 和解压缓冲区在堆外）。公网部署请为解析服务配置容器内存/CPU 上限和入口请求限制；当前方案不提供跨实例资源调度。
 
 ### 常见服务商配置对照表
 

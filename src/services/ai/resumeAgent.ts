@@ -19,7 +19,7 @@ class ResumeAgentClientError extends Error {
 }
 
 async function postJSON<T>(url: string, body: unknown, signal?: AbortSignal): Promise<T> {
-  const effectiveSignal = signal ?? AbortSignal.timeout(60_000);
+  const effectiveSignal = AbortSignal.any([...(signal ? [signal] : []), AbortSignal.timeout(80_000)]);
   const aiHeaders = getAIHeaders();
   const { value: safeBody, piiMap } = anonymizePayload(body, useResumeStore.getState().enablePIIMasking);
 
@@ -104,7 +104,7 @@ export async function runResumeAnalysisStream(
 
   const { value: inputToSend, piiMap } = anonymizePayload(input, enablePIIMasking);
 
-  const effectiveSignal = signal ?? AbortSignal.timeout(90_000);
+  const effectiveSignal = AbortSignal.any([...(signal ? [signal] : []), AbortSignal.timeout(90_000)]);
   const aiHeaders = getAIHeaders();
 
   let response: Response;
@@ -192,12 +192,13 @@ export async function runResumeAnalysisStream(
 
 export async function regenerateOptimizedItems(
   input: UserInput,
-  style: OptimizeStyle
+  style: OptimizeStyle,
+  signal?: AbortSignal
 ): Promise<{
   optimizedItems: AnalysisResult["optimizedItems"];
-  finalResume?: AnalysisResult["finalResume"];
+  finalResume: AnalysisResult["finalResume"];
 }> {
-  const data = await postJSON<OptimizeResponseBody>("/api/optimize", { input, style });
+  const data = await postJSON<OptimizeResponseBody>("/api/optimize", { input, style }, signal);
   return { optimizedItems: data.optimizedItems, finalResume: data.finalResume };
 }
 
@@ -205,14 +206,15 @@ export async function generateFollowUpBullet(
   input: UserInput,
   question: string,
   purpose: string,
-  userAnswer: string
+  userAnswer: string,
+  signal?: AbortSignal
 ): Promise<string> {
   const data = await postJSON<FollowUpBulletResponseBody>("/api/follow-up/bullet", {
     input,
     question,
     purpose,
     userAnswer,
-  });
+  }, signal);
   return data.bullet;
 }
 
@@ -222,13 +224,14 @@ export async function generateFollowUpBullet(
 export async function applyFollowUpBullets(
   input: UserInput,
   style: OptimizeStyle,
-  bullets: { purpose: string; bullet: string }[]
+  bullets: { purpose: string; bullet: string }[],
+  signal?: AbortSignal
 ): Promise<Pick<AnalysisResult, "optimizedItems" | "finalResume">> {
   const data = await postJSON<ApplyFollowUpResponseBody>("/api/apply-followup", {
     input,
     style,
     bullets,
-  });
+  }, signal);
   return {
     optimizedItems: data.optimizedItems,
     finalResume: data.finalResume,

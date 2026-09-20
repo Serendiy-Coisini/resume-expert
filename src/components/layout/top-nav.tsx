@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useShallow } from "zustand/react/shallow";
 import { FileText, Menu, RotateCcw, Settings } from "lucide-react";
 import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
@@ -11,7 +12,7 @@ import { useResumeStore } from "@/store/resume-store";
 import { useAIConfigStore } from "@/store/ai-config-store";
 
 export function TopNav({ onMenuClick }: { onMenuClick?: () => void }) {
-  const { aiMode, setAiMode, analysisResult, reset } = useResumeStore();
+  const { aiMode, setAiMode, analysisResult, reset } = useResumeStore(useShallow((state) => ({ aiMode: state.aiMode, setAiMode: state.setAiMode, analysisResult: state.analysisResult, reset: state.reset })));
   const { config: userAIConfig } = useAIConfigStore();
   const [mockReason, setMockReason] = useState<string | null>(null);
 

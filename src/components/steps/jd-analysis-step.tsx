@@ -1,6 +1,7 @@
 "use client";
 
 import { Building2, ChevronLeft, ChevronRight, Download, Printer, Sparkles } from "lucide-react";
+import { useShallow } from "zustand/react/shallow";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -23,7 +24,7 @@ import { getCompanyTypeOption } from "@/lib/company-config";
 import { getJobStageOption } from "@/lib/job-stage-config";
 
 export function JDAnalysisStep() {
-  const { userInput, analysisResult, setCurrentStep } = useResumeStore();
+  const { userInput, analysisResult, setCurrentStep } = useResumeStore(useShallow((state) => ({ userInput: state.userInput, analysisResult: state.analysisResult, setCurrentStep: state.setCurrentStep })));
 
   if (!analysisResult || !analysisResult.jdAnalysis) {
     return (

@@ -1,6 +1,8 @@
 import type { AIMode } from "@/lib/ai/types";
 import { validateAndSanitizeBaseUrl } from "@/lib/ai/ssrf";
 import { z } from "zod";
+import { authorizeServerLLM, serverAccessConfigured } from "@/lib/ai/server-access";
+import { RequestValidationError } from "@/lib/ai/request-validation";
 
 const browserConfigSchema = z.object({
   apiKey: z.string().trim().min(1).max(512),
@@ -12,6 +14,7 @@ const browserConfigSchema = z.object({
 }).strict();
 
 export interface AIConfig {
+  serverPrincipal?: string;
   mode: AIMode;
   apiKey: string;
   baseUrl: string;
@@ -39,10 +42,11 @@ export function getAIConfig(req?: Request): AIConfig {
         const candidate = JSON.parse(decodeURIComponent(rawHeader));
         const validated = browserConfigSchema.safeParse(candidate);
         parsed = validated.success ? validated.data : null;
-      } catch (err) {
-        console.warn("[getAIConfig] Failed to parse x-llm-config header:", err);
+      } catch {
+        // Malformed headers may contain credentials; never log their contents.
       }
 
+      if (!parsed) throw new RequestValidationError("浏览器 AI 配置格式无效");
       if (parsed && parsed.apiKey && typeof parsed.apiKey === "string" && parsed.apiKey.trim()) {
         const apiKey = parsed.apiKey.trim();
         const rawBaseUrl = parsed.baseUrl?.trim() || "https://api.openai.com/v1";
@@ -61,15 +65,18 @@ export function getAIConfig(req?: Request): AIConfig {
         };
       }
     }
+    if (rawHeader && rawHeader.length > 16_384) throw new RequestValidationError("AI 配置请求头过大", 413);
   }
 
   const apiKey = process.env.LLM_API_KEY?.trim() ?? "";
   const forceMock = process.env.USE_MOCK_AI === "true";
   const allowServerKey = process.env.ALLOW_SERVER_LLM_KEY === "true";
   const mode: AIMode = !forceMock && apiKey && allowServerKey ? "llm" : "mock";
+  const serverPrincipal = mode === "llm" && req ? authorizeServerLLM(req) : undefined;
 
   return {
     mode,
+    serverPrincipal,
     apiKey,
     baseUrl: (process.env.LLM_BASE_URL?.trim() || "https://api.openai.com/v1").replace(/\/$/, ""),
     model: process.env.LLM_MODEL?.trim() || "gpt-4o-mini",
@@ -85,7 +92,7 @@ export function getPublicAIStatus() {
   const serverKeyDisabled = Boolean(config.apiKey) && process.env.ALLOW_SERVER_LLM_KEY !== "true";
 
   return {
-    mode: config.mode,
+    mode: config.mode === "llm" && !serverAccessConfigured() ? "mock" : config.mode,
     model: config.mode === "llm" ? config.model : undefined,
     provider: config.mode === "llm" ? config.provider : undefined,
     reason:

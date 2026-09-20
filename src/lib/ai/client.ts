@@ -3,6 +3,7 @@ import { safeAIFetch } from "@/lib/ai/safe-fetch";
 import { getAIConfig, type AIConfig } from "@/lib/ai/config";
 import { LLMError } from "@/lib/ai/errors";
 import { parseJSONFromMessage } from "@/lib/ai/parse-json";
+import { RequestValidationError } from "@/lib/ai/request-validation";
 
 export { LLMError } from "@/lib/ai/errors";
 
@@ -100,7 +101,7 @@ async function callChatCompletions(
         signal: options.signal
           ? AbortSignal.any([options.signal, AbortSignal.timeout(60_000)])
           : AbortSignal.timeout(60_000),
-      });
+      }, config);
 
       if (!response.ok) {
         const detail = await response.text().catch(() => "");
@@ -142,6 +143,7 @@ async function callChatCompletions(
         }>;
       };
     } catch (err) {
+      if (err instanceof RequestValidationError) throw new LLMError(err.message, err.status);
       if (options.signal?.aborted) throw new LLMError("请求已取消");
       if (err instanceof LLMError) {
         throw err;

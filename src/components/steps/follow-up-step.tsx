@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useShallow } from "zustand/react/shallow";
 import { Check, ChevronLeft, ChevronRight, Loader2, Sparkles, Wand2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -21,7 +22,9 @@ export function FollowUpStep() {
     patchAnalysisResult,
     setCurrentStep,
     sessionId,
-  } = useResumeStore();
+  } = useResumeStore(useShallow((state) => ({ analysisResult: state.analysisResult, userInput: state.userInput, optimizeStyle: state.optimizeStyle, updateFollowUpAnswer: state.updateFollowUpAnswer, setFollowUpBullet: state.setFollowUpBullet, patchAnalysisResult: state.patchAnalysisResult, setCurrentStep: state.setCurrentStep, sessionId: state.sessionId })));
+  const tasks = useRef(new Set<AbortController>());
+  useEffect(() => { const active = tasks.current; return () => active.forEach(task => task.abort()); }, []);
   const [loadingIds, setLoadingIds] = useState<Set<string>>(new Set());
   const [applying, setApplying] = useState(false);
   const [applied, setApplied] = useState(false);
@@ -49,6 +52,8 @@ export function FollowUpStep() {
     if (!question || !(question.userAnswer || "").trim()) return;
 
     const startedSessionId = sessionId;
+    const task = new AbortController();
+    tasks.current.add(task);
     const startedAnswer = question.userAnswer;
     setLoadingIds((current) => new Set(current).add(id));
     setError(null);
@@ -58,7 +63,7 @@ export function FollowUpStep() {
         userInput,
         question.question,
         question.purpose,
-        question.userAnswer
+        question.userAnswer, task.signal
       );
       const current = useResumeStore.getState();
       const currentQuestion = current.analysisResult?.followUpQuestions.find((item) => item.id === id);
@@ -67,8 +72,10 @@ export function FollowUpStep() {
         setCustomGeneratedIds((prev) => new Set(prev).add(id));
       }
     } catch (err) {
+      if (task.signal.aborted) return;
       setError(err instanceof Error ? err.message : "Bullet 生成失败");
     } finally {
+      tasks.current.delete(task);
       setLoadingIds((current) => {
         const next = new Set(current);
         next.delete(id);
@@ -79,24 +86,30 @@ export function FollowUpStep() {
 
   const handleApplyBullets = async () => {
     if (!generatedBullets.length) return;
+    const revision = useResumeStore.getState().resultRevision;
     setApplying(true);
     const startedSessionId = sessionId;
+    const task = new AbortController();
+    tasks.current.add(task);
     setError(null);
     try {
       const { optimizedItems, finalResume } = await applyFollowUpBullets(
         userInput,
         optimizeStyle,
-        generatedBullets
+        generatedBullets, task.signal
       );
-      patchAnalysisResult({
+      const committed = patchAnalysisResult({
         optimizedItems,
-        finalResume,
+        finalResume: { ...finalResume, personalInfo: { ...finalResume.personalInfo, avatarUrl: userInput.avatarUrl } },
         englishResume: undefined,
-      }, startedSessionId);
-      if (useResumeStore.getState().sessionId === startedSessionId) setApplied(true);
+      }, startedSessionId, revision);
+      if (committed) setApplied(true);
+      else setError("回答或简历已变化，本次旧结果未应用，请重试。");
     } catch (err) {
+      if (task.signal.aborted) return;
       setError(err instanceof Error ? err.message : "应用追问结果失败");
     } finally {
+      tasks.current.delete(task);
       setApplying(false);
     }
   };
@@ -182,7 +195,7 @@ export function FollowUpStep() {
                     className="min-h-[85px] text-sm focus-visible:ring-blue-500"
                     placeholder="填写您的真实经历、数据与做法..."
                     value={q.userAnswer}
-                    onChange={(e) => updateFollowUpAnswer(q.id, e.target.value)}
+                    onChange={(e) => { setApplied(false); updateFollowUpAnswer(q.id, e.target.value); }}
                   />
                 </div>
 

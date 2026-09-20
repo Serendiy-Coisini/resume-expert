@@ -3,6 +3,9 @@
  * Limits requests per client IP to prevent denial of service and API quota exhaustion.
  */
 
+import { createHash } from "node:crypto";
+import { isIP } from "node:net";
+
 interface RateLimitOptions {
   /** Maximum allowed requests within the time window */
   maxRequests?: number;
@@ -44,17 +47,19 @@ if (typeof setInterval !== "undefined") {
  * Extracts client IP from standard proxy headers or falls back to loopback.
  */
 export function getClientIp(req: Request): string {
+  const credential = req.headers.get("x-server-access-token") || req.headers.get("x-llm-config");
+  if (credential && credential.length <= 16_384) return `credential:${createHash("sha256").update(credential).digest("hex")}`;
   if (process.env.TRUST_PROXY_HEADERS !== "true") return "untrusted-client";
   const xForwardedFor = req.headers.get("x-forwarded-for");
   if (xForwardedFor) {
     const clientIp = xForwardedFor.split(",")[0]?.trim();
-    if (clientIp) return clientIp;
+    if (clientIp && isIP(clientIp)) return clientIp;
   }
   const xRealIp = req.headers.get("x-real-ip");
-  if (xRealIp?.trim()) return xRealIp.trim();
+  if (xRealIp?.trim() && isIP(xRealIp.trim())) return xRealIp.trim();
 
   const cfConnectingIp = req.headers.get("cf-connecting-ip");
-  if (cfConnectingIp?.trim()) return cfConnectingIp.trim();
+  if (cfConnectingIp?.trim() && isIP(cfConnectingIp.trim())) return cfConnectingIp.trim();
 
   return "127.0.0.1";
 }
@@ -85,6 +90,11 @@ export function checkRateLimit(
   const key = `${new URL(req.url).pathname}:${ip}`;
   const now = Date.now();
   const windowStart = now - windowMs;
+  const aggregateKey = `aggregate:${new URL(req.url).pathname}`;
+  const aggregate = (ipRequestsMap.get(aggregateKey) ?? []).filter(t => t > now - 60_000);
+  if (aggregate.length >= 100 || (!ipRequestsMap.has(key) && ipRequestsMap.size >= 10_000)) {
+    return { success: false, limit: 100, remaining: 0, resetInSeconds: 60 };
+  }
 
   const timestamps = ipRequestsMap.get(key) || [];
   // Filter only timestamps in the current window
@@ -102,6 +112,8 @@ export function checkRateLimit(
   }
 
   validTimestamps.push(now);
+  aggregate.push(now);
+  ipRequestsMap.set(aggregateKey, aggregate);
   ipRequestsMap.set(key, validTimestamps);
 
   const remaining = Math.max(0, maxRequests - validTimestamps.length);

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getAIConfig } from "@/lib/ai/config";
-import { LLMError } from "@/lib/ai/client";
-import { followUpBulletRequestSchema, parseJSONBody, RequestValidationError } from "@/lib/ai/request-validation";
+import { aiErrorResponse } from "@/lib/ai/error-response";
+import { followUpBulletRequestSchema, parseJSONBody } from "@/lib/ai/request-validation";
 import { rateLimitResponse } from "@/lib/rate-limit";
 import { generateFollowUpBulletServer } from "@/services/ai/resumeAgent.server";
 
@@ -27,10 +27,6 @@ export async function POST(request: Request) {
     );
     return NextResponse.json({ bullet, mode });
   } catch (error) {
-    if (error instanceof RequestValidationError) {
-      return NextResponse.json({ error: error.message }, { status: error.status });
-    }
-    const message = error instanceof LLMError ? error.message : "Bullet 生成失败，请稍后重试";
-    return NextResponse.json({ error: message }, { status: 500 });
+    return aiErrorResponse(error, "Bullet 生成失败，请稍后重试");
   }
 }

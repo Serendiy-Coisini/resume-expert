@@ -1,6 +1,7 @@
 "use client";
 
 import { ChevronLeft, ChevronRight, Printer } from "lucide-react";
+import { useShallow } from "zustand/react/shallow";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
@@ -13,7 +14,7 @@ import { useResumeStore } from "@/store/resume-store";
 import { exportFullAnalysisAsPDF } from "@/lib/export-analysis-pdf";
 
 export function DiagnosisStep() {
-  const { userInput, analysisResult, setCurrentStep } = useResumeStore();
+  const { userInput, analysisResult, setCurrentStep } = useResumeStore(useShallow((state) => ({ userInput: state.userInput, analysisResult: state.analysisResult, setCurrentStep: state.setCurrentStep })));
 
   if (!analysisResult || !analysisResult.diagnosis) {
     return (
