@@ -223,6 +223,76 @@ export function getSafeSectionTitleTop(
 }
 
 /**
+ * 判断是否为纵向时间轴竖线（如 timeline-tech 中的 widget-timeline-line-work / widget-timeline-line-proj）
+ * 特征：窄竖条 (width <= 15)，id/title 明确标明时间轴线或纵向线。
+ * 严禁误伤横向节标题分割线（如 classic-minimal 中的 widget-sec-line-work / widget-sec-line-project）。
+ */
+export function isTimelineVerticalLine(w: IWidget): boolean {
+  if (!w) return false;
+  const idLower = (w.id || '').toLowerCase();
+  const titleLower = (w.title || '').toLowerCase();
+  const width = Number(w.css?.width) || 0;
+
+  // 圆点、节点或非线状图形绝对不是时间轴竖线
+  if (
+    w.componentName === 'hj-circle' ||
+    idLower.includes('dot') ||
+    titleLower.includes('节点') ||
+    titleLower.includes('圆点')
+  ) {
+    return false;
+  }
+
+  // 横向分割线或横向下划线宽度通常 >= 100，坚决不是时间轴竖线
+  if (
+    idLower.includes('sec-line') ||
+    idLower.includes('sec_line') ||
+    idLower.includes('header-line') ||
+    idLower.includes('header-border') ||
+    titleLower.includes('分割线') ||
+    titleLower.includes('下划线') ||
+    width > 20
+  ) {
+    return false;
+  }
+
+  // 必须是极窄竖线 (width <= 15) 且明确含有时间轴线相关标记
+  return (
+    idLower.includes('timeline-line') ||
+    titleLower.includes('时间轴线') ||
+    titleLower.includes('时间轴竖线') ||
+    (width <= 10 &&
+      (idLower.includes('tl-line') ||
+        idLower.includes('line-work') ||
+        idLower.includes('line-proj') ||
+        idLower.includes('line_work') ||
+        idLower.includes('line_proj')))
+  );
+}
+
+/**
+ * 判断是否为节标题横向下划线/分割线（如 classic-minimal 中的 widget-sec-line-*）
+ * 特征：横向细长条 (width >= 100, height <= 6)。
+ */
+export function isHorizontalDividerLine(w: IWidget): boolean {
+  if (!w || isTimelineVerticalLine(w)) return false;
+  const idLower = (w.id || '').toLowerCase();
+  const titleLower = (w.title || '').toLowerCase();
+  const width = Number(w.css?.width) || 0;
+  const height = Number(w.css?.height) || 0;
+
+  return (
+    idLower.includes('sec-line') ||
+    idLower.includes('sec_line') ||
+    idLower.includes('header-line') ||
+    idLower.includes('header-border') ||
+    titleLower.includes('分割线') ||
+    titleLower.includes('下划线') ||
+    (height <= 6 && width >= 100)
+  );
+}
+
+/**
  * 针对整个积木画布执行全局“一键智能分页防截断重排”
  * 核心设计准则：
  * 1. 结构化成组防截断：保持微部件（如单行内多个技能胶囊、卡片容器内的文字元素等）原有的横向与内部相对坐标，杜绝一维序列下推导致布局打乱或阶梯状倾斜。
@@ -336,35 +406,12 @@ export function reflowCanvasWidgetsForPagination(schema: IHJSchema): IHJSchema {
       handledIds.add(tw.id);
 
       // 寻找相伴的下划线 / 分割线 (例如 widget-sec-line-*)
-      // 注意：必须严格排除纵向时间轴竖线 (width <= 10 或包含 timeline-line)，仅匹配水平横向分割线
+      // 注意：必须严格排除纵向时间轴竖线，仅匹配水平横向分割线
       const accompanyingLines = flowWidgets.filter((lw) => {
         if (handledIds.has(lw.id)) return false;
         const lTop = origTops.get(lw.id) || 0;
-        const lH = Number(lw.css.height) || 0;
-        const lW = Number(lw.css.width) || 0;
-        const idLower = (lw.id || '').toLowerCase();
-        const titleLower = (lw.title || '').toLowerCase();
-
-        // 排除时间轴竖线及各类纵向构件
-        if (
-          idLower.includes('timeline-line') ||
-          idLower.includes('line-work') ||
-          idLower.includes('line-proj') ||
-          titleLower.includes('时间轴') ||
-          lW <= 10
-        ) {
-          return false;
-        }
-
-        const isHorizontalLine =
-          idLower.includes('sec-line') ||
-          idLower.includes('sec_line') ||
-          idLower.includes('header-line') ||
-          titleLower.includes('分割线') ||
-          titleLower.includes('下划线') ||
-          (lH <= 4 && lW >= 200);
-
-        return isHorizontalLine && Math.abs(lTop - (tTop + tH)) <= 15;
+        const isHorizontal = isHorizontalDividerLine(lw);
+        return isHorizontal && Math.abs(lTop - (tTop + tH)) <= 15;
       });
 
       accompanyingLines.forEach((lw) => handledIds.add(lw.id));
@@ -433,19 +480,12 @@ export function reflowCanvasWidgetsForPagination(schema: IHJSchema): IHJSchema {
     // 4. 抽取经历/项目卡片（含时间轴节点 dot）
     flowWidgets.forEach((w) => {
       if (handledIds.has(w.id)) return;
-      const idLower = (w.id || '').toLowerCase();
-      const titleLower = (w.title || '').toLowerCase();
-
-      if (
-        idLower.includes('line-work') ||
-        idLower.includes('line-proj') ||
-        idLower.includes('timeline-line') ||
-        titleLower.includes('时间轴线')
-      ) {
+      if (isTimelineVerticalLine(w)) {
         // 时间轴竖线排版后单独做端点延伸计算，不作为驱动块
         return;
       }
 
+      const idLower = (w.id || '').toLowerCase();
       // 如果当前是 dot 圆点，先跳过，等待对应卡片将其作为伴随部件抽取
       if (idLower.includes('dot') || w.componentName === 'hj-circle') {
         return;
@@ -481,14 +521,7 @@ export function reflowCanvasWidgetsForPagination(schema: IHJSchema): IHJSchema {
     // 4.1 兜底：处理未被任何卡片绑定的孤立小部件
     flowWidgets.forEach((w) => {
       if (handledIds.has(w.id)) return;
-      const idLower = (w.id || '').toLowerCase();
-      const titleLower = (w.title || '').toLowerCase();
-      if (
-        idLower.includes('line-work') ||
-        idLower.includes('line-proj') ||
-        idLower.includes('timeline-line') ||
-        titleLower.includes('时间轴线')
-      ) {
+      if (isTimelineVerticalLine(w)) {
         return;
       }
       handledIds.add(w.id);
@@ -608,17 +641,21 @@ export function reflowCanvasWidgetsForPagination(schema: IHJSchema): IHJSchema {
       });
     });
 
-    // 8. 重新连接与延伸时间轴竖线
+    // 8. 重新连接与延伸时间轴竖线（仅针对真正的时间轴竖条，坚决不误伤横向分割线）
     ['work', 'proj'].forEach((prefix) => {
       const lineW = page.children.find(
-        (w) => (w.id || '').includes(`line-${prefix}`) || (w.id || '').includes(`line_${prefix}`)
+        (w) =>
+          isTimelineVerticalLine(w) &&
+          ((w.id || '').toLowerCase().includes(prefix) ||
+            (w.title || '').includes(prefix === 'work' ? '工作' : '项目'))
       );
       const sectionCards = page.children.filter(
         (w) =>
           ((w.id || '').includes(`-${prefix}-`) ||
             (w.id || '').includes(`_${prefix}_`) ||
             (prefix === 'proj' && ((w.id || '').includes('-project-') || (w.id || '').includes('_project_')))) &&
-          !((w.id || '').includes('timeline-line'))
+          !isTimelineVerticalLine(w) &&
+          !((w.id || '').toLowerCase().includes('dot') || w.componentName === 'hj-circle')
       );
 
       if (lineW && sectionCards.length > 0) {
@@ -1970,10 +2007,14 @@ export function fillAiDataIntoExistingSchema(
     sections.forEach(({ type }) => {
       if (type === 'summary' && summaryWidgets.length > 0) {
         const titleW = summaryWidgets.find((w) => (w.title || '').includes('标题') || (w.id || '').includes('title'));
-        const contentW = summaryWidgets.find((w) => w !== titleW);
+        const secLineW = summaryWidgets.find((w) => isHorizontalDividerLine(w));
+        const contentW = summaryWidgets.find((w) => w !== titleW && w !== secLineW && !isDecorativeOrBackgroundWidget(w));
         if (titleW) {
           flowY = getSafeSectionTitleTop(flowY, Number(titleW.css.height) || 28, 50);
           titleW.css.top = flowY;
+          if (secLineW) {
+            secLineW.css.top = flowY + (Number(titleW.css.height) || 24);
+          }
           flowY += (Number(titleW.css.height) || 28) + 6;
         }
         if (contentW) {
@@ -1984,10 +2025,14 @@ export function fillAiDataIntoExistingSchema(
         }
       } else if (type === 'skills' && skillsSectionWidgets.length > 0) {
         const titleW = skillsSectionWidgets.find((w) => (w.title || '').includes('标题') || (w.id || '').includes('title'));
-        const nonTitle = skillsSectionWidgets.filter((w) => w !== titleW);
+        const secLineW = skillsSectionWidgets.find((w) => isHorizontalDividerLine(w));
+        const nonTitle = skillsSectionWidgets.filter((w) => w !== titleW && w !== secLineW && !isDecorativeOrBackgroundWidget(w));
         if (titleW) {
           flowY = getSafeSectionTitleTop(flowY, Number(titleW.css.height) || 28, 40);
           titleW.css.top = flowY;
+          if (secLineW) {
+            secLineW.css.top = flowY + (Number(titleW.css.height) || 24);
+          }
           flowY += (Number(titleW.css.height) || 28) + 8;
         }
         if (nonTitle.length === 1) {
@@ -2016,18 +2061,22 @@ export function fillAiDataIntoExistingSchema(
         }
       } else if (type === 'work' && workSectionWidgets.length > 0) {
         const titleW = workSectionWidgets.find((w) => (w.title || '').includes('标题') || (w.id || '').includes('title'));
+        const secLineW = workSectionWidgets.find((w) => isHorizontalDividerLine(w));
         const cards = workSectionWidgets.filter((w) =>
           !isDecorativeOrBackgroundWidget(w) &&
           !(w.title || '').includes('标题') &&
           !(w.id || '').includes('title')
         );
-        const lineW = workSectionWidgets.find((w) => (w.id || '').includes('line-work'));
+        const lineW = workSectionWidgets.find((w) => isTimelineVerticalLine(w));
         const dots = workSectionWidgets.filter((w) => (w.id || '').includes('dot-work'));
 
         if (titleW) {
           const firstWorkH = cards.length > 0 ? (Number(cards[0].css.height) || 90) : 90;
           flowY = getSafeSectionTitleTop(flowY, Number(titleW.css.height) || 28, firstWorkH + 8);
           titleW.css.top = flowY;
+          if (secLineW) {
+            secLineW.css.top = flowY + (Number(titleW.css.height) || 24);
+          }
           flowY += (Number(titleW.css.height) || 28) + 8;
         }
         const workLineStart = flowY + 4;
@@ -2046,18 +2095,22 @@ export function fillAiDataIntoExistingSchema(
         flowY += 8;
       } else if (type === 'project' && projectSectionWidgets.length > 0) {
         const titleW = projectSectionWidgets.find((w) => (w.title || '').includes('标题') || (w.id || '').includes('title'));
+        const secLineW = projectSectionWidgets.find((w) => isHorizontalDividerLine(w));
         const cards = projectSectionWidgets.filter((w) =>
           !isDecorativeOrBackgroundWidget(w) &&
           !(w.title || '').includes('标题') &&
           !(w.id || '').includes('title')
         );
-        const lineW = projectSectionWidgets.find((w) => (w.id || '').includes('line-proj'));
+        const lineW = projectSectionWidgets.find((w) => isTimelineVerticalLine(w));
         const dots = projectSectionWidgets.filter((w) => (w.id || '').includes('dot-proj'));
 
         if (titleW) {
           const firstProjH = cards.length > 0 ? (Number(cards[0].css.height) || 90) : 90;
           flowY = getSafeSectionTitleTop(flowY, Number(titleW.css.height) || 28, firstProjH + 8);
           titleW.css.top = flowY;
+          if (secLineW) {
+            secLineW.css.top = flowY + (Number(titleW.css.height) || 24);
+          }
           flowY += (Number(titleW.css.height) || 28) + 8;
         }
         const projLineStart = flowY + 4;
@@ -2076,10 +2129,14 @@ export function fillAiDataIntoExistingSchema(
         flowY += 8;
       } else if (type === 'education' && eduSectionWidgets.length > 0) {
         const titleW = eduSectionWidgets.find((w) => (w.title || '').includes('标题') || (w.id || '').includes('title'));
-        const contentW = eduSectionWidgets.find((w) => w !== titleW);
+        const secLineW = eduSectionWidgets.find((w) => isHorizontalDividerLine(w));
+        const contentW = eduSectionWidgets.find((w) => w !== titleW && w !== secLineW && !isDecorativeOrBackgroundWidget(w));
         if (titleW) {
           flowY = getSafeSectionTitleTop(flowY, Number(titleW.css.height) || 28, 40);
           titleW.css.top = flowY;
+          if (secLineW) {
+            secLineW.css.top = flowY + (Number(titleW.css.height) || 24);
+          }
           flowY += (Number(titleW.css.height) || 28) + 6;
         }
         if (contentW) {

@@ -204,3 +204,56 @@ test("shared model access fails closed and enforces per-user upstream budgets", 
     for (const name of names) { if (previous[name] === undefined) delete process.env[name]; else process.env[name] = previous[name]; }
   }
 });
+
+test("classic-minimal retains thin 1px section divider lines without background stretch", () => {
+  const sampleResume: FinalResume = {
+    personalInfo: { name: "测试", email: "test@test.com", phone: "13800000000", location: "北京" },
+    jobIntent: "前端工程师",
+    summary: "有丰富的前端开发经验",
+    coreSkills: ["React", "TypeScript"],
+    workExperience: [
+      { company: "科技公司", role: "前端工程师", period: "2021-2023", bullets: ["主导项目重构", "提升性能 30%"] }
+    ],
+    projectExperience: [
+      { name: "项目 A", role: "负责人", period: "2022-2023", bullets: ["核心架构设计"] }
+    ],
+    skillsAndTools: ["Git", "Node.js"],
+    education: { school: "大学", degree: "学士", period: "2017-2021" }
+  };
+  const sampleResult = { finalResume: sampleResume, optimizedItems: [], followUpQuestions: [] } as unknown as AnalysisResult;
+
+  const schema = buildLegoSchemaFromResume(input, sampleResult, "classic-minimal");
+  const widgets = schema.componentsTree[0].children;
+
+  const secLines = widgets.filter((w) => (w.id || "").includes("sec-line"));
+  assert.ok(secLines.length >= 3, "classic-minimal should have section divider lines");
+
+  secLines.forEach((line) => {
+    assert.equal(Number(line.css.height), 1, `Line ${line.id} height must be 1px, got ${line.css.height}`);
+    assert.equal(Number(line.css.width), 760, `Line ${line.id} width must be 760px`);
+  });
+
+  const workLine = widgets.find((w) => w.id === "widget-sec-line-work");
+  const workTitle = widgets.find((w) => w.id === "widget-sec-title-work");
+  assert.ok(workLine && workTitle, "work line and title must exist");
+  assert.equal(Number(workLine.css.top), Number(workTitle.css.top) + Number(workTitle.css.height));
+
+  // Also verify fillAiDataIntoExistingSchema preserves 1px divider lines
+  const refilled = fillAiDataIntoExistingSchema(schema, input, sampleResult);
+  const refilledSecLines = refilled.componentsTree[0].children.filter((w) => (w.id || "").includes("sec-line"));
+  refilledSecLines.forEach((line) => {
+    assert.equal(Number(line.css.height), 1, `Refilled line ${line.id} height must be 1px, got ${line.css.height}`);
+  });
+
+  // Verify timeline-tech vertical line
+  const timelineSchema = buildLegoSchemaFromResume(input, sampleResult, "timeline-tech");
+  const timelineWidgets = timelineSchema.componentsTree[0].children;
+  const tlLine = timelineWidgets.find((w) => w.id === "widget-timeline-line-work");
+  const tlDot = timelineWidgets.find((w) => w.id === "widget-tl-dot-work-0");
+  assert.ok(tlLine && tlDot);
+  assert.equal(Number(tlLine.css.width), 2);
+  assert.ok(Number(tlLine.css.height) >= 40);
+  assert.equal(Number(tlDot.css.width), 9);
+  assert.equal(Number(tlDot.css.height), 9);
+});
+
