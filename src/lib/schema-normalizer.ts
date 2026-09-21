@@ -1,4 +1,5 @@
 import type { IHJSchema, IWidget, IPageComponent, IWidgetCss, IWidgetDataSource } from '@/types/lego';
+import type { FinalResume } from '@/types/resume';
 
 function extractValue(val: unknown): string {
   if (val === null || val === undefined) return '';
@@ -40,10 +41,21 @@ function parseFiniteNumber(val: unknown, fallback: number): number {
   return fallback;
 }
 
-export function ensureValidWidget(rawWidget: Record<string, unknown> | null | undefined, index?: number): IWidget {
+export function ensureValidWidget(
+  rawWidget: Record<string, unknown> | null | undefined,
+  index?: number,
+  seenIds?: Set<string>
+): IWidget {
   if (!rawWidget || typeof rawWidget !== 'object') {
+    let fallbackId = `widget-${Date.now()}-${index || 0}-${Math.random().toString(36).substring(2, 7)}`;
+    if (seenIds) {
+      while (seenIds.has(fallbackId)) {
+        fallbackId = `widget-${Date.now()}-${index || 0}-${Math.random().toString(36).substring(2, 7)}`;
+      }
+      seenIds.add(fallbackId);
+    }
     return {
-      id: `widget-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+      id: fallbackId,
       componentName: 'hj-text-1',
       title: '文本组件',
       css: { left: 40, top: 40 + (index || 0) * 50, zIndex: 1, width: 200, height: 40 },
@@ -76,10 +88,37 @@ export function ensureValidWidget(rawWidget: Record<string, unknown> | null | un
     left: Math.max(0, Math.min(1000, parseFiniteNumber(padding.left, 0)))
   };
 
+  const margin = (css.margin || {}) as Record<string, unknown>;
+  const safeMargin = {
+    top: Math.max(0, Math.min(1000, parseFiniteNumber(margin.top, 0))),
+    right: Math.max(0, Math.min(1000, parseFiniteNumber(margin.right, 0))),
+    bottom: Math.max(0, Math.min(1000, parseFiniteNumber(margin.bottom, 0))),
+    left: Math.max(0, Math.min(1000, parseFiniteNumber(margin.left, 0)))
+  };
+
   const parsedLeft = parseFiniteNumber(css.left, 40);
   const parsedTop = parseFiniteNumber(css.top, 40 + (index || 0) * 50);
   const parsedWidth = parseFiniteNumber(css.width, defaultFallbackWidth);
   const parsedHeight = parseFiniteNumber(css.height, defaultFallbackHeight);
+
+  // Preserve opacity including 0!
+  const safeOpacity = typeof css.opacity === 'number' && Number.isFinite(css.opacity)
+    ? Math.max(0, Math.min(1, css.opacity))
+    : (typeof css.opacity === 'string' && !isNaN(Number(css.opacity))
+        ? Math.max(0, Math.min(1, Number(css.opacity)))
+        : 1);
+
+  const allowedDecorations = ['none', 'underline', 'line-through', 'overline'];
+  const rawTextDec = typeof css.textDecoration === 'string' ? css.textDecoration.trim().toLowerCase() : '';
+  const safeTextDecoration = allowedDecorations.includes(rawTextDec) ? rawTextDec : undefined;
+
+  const safeTextShadow = typeof css.textShadow === 'string' && css.textShadow.length <= 100 && !/[<>{}]/.test(css.textShadow)
+    ? css.textShadow.trim()
+    : undefined;
+
+  const safeBoxShadow = typeof css.boxShadow === 'string' && css.boxShadow.length <= 100 && !/[<>{}]/.test(css.boxShadow)
+    ? css.boxShadow.trim()
+    : undefined;
 
   const safeCss: IWidgetCss = {
     left: Math.max(-2000, Math.min(5000, parsedLeft)),
@@ -97,6 +136,8 @@ export function ensureValidWidget(rawWidget: Record<string, unknown> | null | un
     fontColor: (css.fontColor as string) || (css.color as string) || '#333333',
     backgroundColor: (css.backgroundColor as string) || (css.background as string) || '',
     padding: safePadding,
+    margin: safeMargin,
+    opacity: safeOpacity,
     borderWidth: typeof css.borderWidth === 'number' ? css.borderWidth : (css.borderStyle && css.borderStyle !== 'none' ? 1 : 0),
     borderRadius: typeof css.borderRadius === 'number' ? css.borderRadius : ((css.borderRadius as string | number) || 0),
     borderColor: (css.borderColor as string) || '#eee',
@@ -105,10 +146,11 @@ export function ensureValidWidget(rawWidget: Record<string, unknown> | null | un
     borderLeftWidth: typeof css.borderLeftWidth === 'number' ? css.borderLeftWidth : undefined,
     borderLeftColor: (css.borderLeftColor as string) || undefined,
     borderLeftStyle: (css.borderLeftStyle as string) || undefined,
-    paddingLeft: typeof css.paddingLeft === 'number' ? css.paddingLeft : undefined
+    paddingLeft: typeof css.paddingLeft === 'number' ? css.paddingLeft : undefined,
+    textDecoration: safeTextDecoration,
+    textShadow: safeTextShadow,
+    boxShadow: safeBoxShadow
   };
-
-
 
   const dataSource: IWidgetDataSource = rawWidget.dataSource && typeof rawWidget.dataSource === 'object'
     ? { ...(rawWidget.dataSource as Record<string, unknown>) }
@@ -118,20 +160,89 @@ export function ensureValidWidget(rawWidget: Record<string, unknown> | null | un
     dataSource.avatarSrc = (dataSource.avatarSrc || dataSource.avatar || dataSource.url || dataSource.src || '') as string;
   }
   if (componentName.startsWith('hj-text')) {
-    if (dataSource.text === undefined && rawWidget.title) {
-      dataSource.text = rawWidget.title as string;
-    } else if (dataSource.text !== undefined) {
-      dataSource.text = String(dataSource.text);
+    const rawText = dataSource.text !== undefined ? String(dataSource.text) : (rawWidget.title ? String(rawWidget.title) : undefined);
+    if (rawText !== undefined) {
+      if (rawText.length > 10000) {
+        throw new Error(`文本组件内容长度超出限制（最多允许 10000 字符，当前为 ${rawText.length} 字符）`);
+      }
+      dataSource.text = rawText;
     }
   }
   if (componentName === 'hj-li') {
-    if (!Array.isArray(dataSource.list)) {
+    if (Array.isArray(dataSource.list)) {
+      dataSource.list = dataSource.list.map((item) => {
+        if (typeof item === 'string') {
+          if (item.length > 5000) {
+            throw new Error(`列表条目内容长度超出限制（最多允许 5000 字符，当前为 ${item.length} 字符）`);
+          }
+          return item;
+        }
+        if (item && typeof item === 'object') {
+          const obj = item as Record<string, unknown>;
+          const title = typeof obj.title === 'string' ? obj.title : '';
+          if (title.length > 500) {
+            throw new Error(`列表条目标题长度超出限制（最多允许 500 字符，当前为 ${title.length} 字符）`);
+          }
+          const subtitle = typeof obj.subtitle === 'string' ? obj.subtitle : '';
+          if (subtitle.length > 500) {
+            throw new Error(`列表条目副标题长度超出限制（最多允许 500 字符，当前为 ${subtitle.length} 字符）`);
+          }
+          const date = typeof obj.date === 'string' ? obj.date : '';
+          if (date.length > 200) {
+            throw new Error(`列表条目时间长度超出限制（最多允许 200 字符，当前为 ${date.length} 字符）`);
+          }
+          const desc = typeof obj.desc === 'string' ? obj.desc : '';
+          if (desc.length > 5000) {
+            throw new Error(`列表条目描述长度超出限制（最多允许 5000 字符，当前为 ${desc.length} 字符）`);
+          }
+          const text = typeof obj.text === 'string' ? obj.text : undefined;
+          if (text !== undefined && text.length > 5000) {
+            throw new Error(`列表条目文本长度超出限制（最多允许 5000 字符，当前为 ${text.length} 字符）`);
+          }
+          return {
+            title,
+            subtitle,
+            date,
+            desc,
+            text,
+          };
+        }
+        const str = String(item ?? '');
+        if (str.length > 5000) {
+          throw new Error(`列表条目内容长度超出限制（最多允许 5000 字符，当前为 ${str.length} 字符）`);
+        }
+        return str;
+      });
+    } else {
       dataSource.list = ['列表项'];
     }
   }
 
+  if (dataSource.rate !== undefined || dataSource.maxRate !== undefined) {
+    const maxRate = Math.max(1, Math.min(20, Math.round(parseFiniteNumber(dataSource.maxRate, 5))));
+    const rate = Math.max(0, Math.min(maxRate, Math.round(parseFiniteNumber(dataSource.rate, 0))));
+    dataSource.maxRate = maxRate;
+    dataSource.rate = rate;
+  }
+
+  // ID deduplication
+  let finalId = rawWidget.id && typeof rawWidget.id === 'string' && rawWidget.id.trim()
+    ? rawWidget.id.trim()
+    : `widget-${Date.now()}-${index ?? 0}-${Math.random().toString(36).substring(2, 7)}`;
+
+  if (seenIds) {
+    if (seenIds.has(finalId)) {
+      finalId = `${finalId}-dup-${Math.random().toString(36).substring(2, 6)}`;
+    }
+    seenIds.add(finalId);
+  }
+
+  const customProps = (rawWidget.customProps as Record<string, unknown>) || {};
+  const binding = (rawWidget.binding as string) || (customProps.binding as string) || undefined;
+  const section = (rawWidget.section as string) || (customProps.section as string) || undefined;
+
   return {
-    id: (rawWidget.id as string) || `widget-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+    id: finalId,
     componentName,
     commentType: (rawWidget.commentType as string) || 'text',
     icon: (rawWidget.icon as string) || '',
@@ -143,7 +254,9 @@ export function ensureValidWidget(rawWidget: Record<string, unknown> | null | un
     props: (rawWidget.props as Record<string, unknown>) || {},
     css: safeCss,
     dataSource,
-    customProps: (rawWidget.customProps as Record<string, unknown>) || {}
+    customProps,
+    binding,
+    section
   };
 }
 
@@ -461,6 +574,35 @@ export function convertResumeModuleToLegoWidgets(moduleItem: Record<string, unkn
   return { widgets, nextTop: top + 15 };
 }
 
+export function unwrapLegoSchemaWrapper(rawJson: unknown): Record<string, unknown> {
+  if (!rawJson || typeof rawJson !== 'object' || Array.isArray(rawJson)) {
+    return {};
+  }
+  let data = JSON.parse(JSON.stringify(rawJson)) as Record<string, unknown>;
+
+  // Unwrap potential wrapper objects
+  if (data.template_json && typeof data.template_json === 'object' && !Array.isArray(data.template_json)) {
+    data = data.template_json as Record<string, unknown>;
+  }
+  if (data.lego_json && typeof data.lego_json === 'object' && !Array.isArray(data.lego_json)) {
+    data = data.lego_json as Record<string, unknown>;
+  }
+  if (data.HJSchemaJsonStore && typeof data.HJSchemaJsonStore === 'object' && !Array.isArray(data.HJSchemaJsonStore)) {
+    data = data.HJSchemaJsonStore as Record<string, unknown>;
+  }
+  if (
+    data.data &&
+    typeof data.data === 'object' &&
+    !Array.isArray(data.data) &&
+    ((data.data as Record<string, unknown>).componentsTree ||
+      (data.data as Record<string, unknown>).children ||
+      (data.data as Record<string, unknown>).widgets)
+  ) {
+    data = data.data as Record<string, unknown>;
+  }
+  return data;
+}
+
 export function normalizeLegoSchema(rawJson: unknown): IHJSchema {
   if (!rawJson || typeof rawJson !== 'object') {
     return {
@@ -472,15 +614,7 @@ export function normalizeLegoSchema(rawJson: unknown): IHJSchema {
     };
   }
 
-  let data = JSON.parse(JSON.stringify(rawJson)) as Record<string, unknown>;
-
-  // Unwrap potential wrapper objects
-  if (data.template_json && typeof data.template_json === 'object') data = data.template_json as Record<string, unknown>;
-  if (data.lego_json && typeof data.lego_json === 'object') data = data.lego_json as Record<string, unknown>;
-  if (data.HJSchemaJsonStore && typeof data.HJSchemaJsonStore === 'object') data = data.HJSchemaJsonStore as Record<string, unknown>;
-  if (data.data && typeof data.data === 'object' && ((data.data as Record<string, unknown>).componentsTree || (data.data as Record<string, unknown>).children)) {
-    data = data.data as Record<string, unknown>;
-  }
+  const data = unwrapLegoSchemaWrapper(rawJson);
 
   const cssObj = (data.css || {}) as Record<string, unknown>;
   const parsedWidth = parseInt(String(cssObj.width));
@@ -491,14 +625,23 @@ export function normalizeLegoSchema(rawJson: unknown): IHJSchema {
 
   const background = (cssObj.background as string) || (cssObj.backgroundColor as string) || '#ffffff';
 
+  const rawPagePadding = (cssObj.pagePadding || {}) as Record<string, unknown>;
+  const safePagePadding = {
+    top: Math.max(0, Math.min(300, parseFiniteNumber(rawPagePadding.top, 30))),
+    right: Math.max(0, Math.min(300, parseFiniteNumber(rawPagePadding.right, 30))),
+    bottom: Math.max(0, Math.min(300, parseFiniteNumber(rawPagePadding.bottom, 30))),
+    left: Math.max(0, Math.min(300, parseFiniteNumber(rawPagePadding.left, 30)))
+  };
+
   const safeCss = {
     width: safeWidth,
     height: safeHeight,
     background,
-    opacity: typeof cssObj.opacity === 'number' ? cssObj.opacity : 1,
+    opacity: typeof cssObj.opacity === 'number' && Number.isFinite(cssObj.opacity) ? Math.max(0, Math.min(1, cssObj.opacity)) : 1,
     backgroundImage: (cssObj.backgroundImage as string) || '',
     fontFamily: (cssObj.fontFamily as string) || 'Inter, sans-serif',
-    themeColor: (cssObj.themeColor as string) || '#2563eb'
+    themeColor: (cssObj.themeColor as string) || '#2563eb',
+    pagePadding: safePagePadding
   };
 
   const configObj = (data.config || {}) as Record<string, unknown>;
@@ -506,6 +649,7 @@ export function normalizeLegoSchema(rawJson: unknown): IHJSchema {
     title: (configObj.title as string) || '我的简历'
   };
 
+  const seenIds = new Set<string>();
   let pages: IPageComponent[] = [];
 
   if (Array.isArray(data.componentsTree) && data.componentsTree.length > 0) {
@@ -514,19 +658,26 @@ export function normalizeLegoSchema(rawJson: unknown): IHJSchema {
         item &&
         typeof item === 'object' &&
         ((item as Record<string, unknown>).componentName === 'page' ||
-          (item as Record<string, unknown>).commentType === 'page')
+          (item as Record<string, unknown>).commentType === 'page' ||
+          Array.isArray((item as Record<string, unknown>).children))
     );
 
     if (hasPages) {
+      if (data.componentsTree.length > 20) {
+        throw new Error(`积木数据超出最大允许页数限制（最多支持 20 页，当前包含 ${data.componentsTree.length} 页）`);
+      }
       pages = data.componentsTree.map((pageItem: unknown, pIdx: number) => {
         const pObj = (pageItem || {}) as Record<string, unknown>;
         const childrenList = Array.isArray(pObj.children) ? pObj.children : [];
+        if (childrenList.length > 500) {
+          throw new Error(`第 ${pIdx + 1} 页组件数量超出限制（单页最多支持 500 个组件，当前包含 ${childrenList.length} 个）`);
+        }
         return {
           id: (pObj.id as string) || `page-${pIdx + 1}`,
           componentName: 'page',
           commentType: 'page',
           children: childrenList.map((w: unknown, wIdx: number) =>
-            ensureValidWidget(w as Record<string, unknown>, wIdx)
+            ensureValidWidget(w as Record<string, unknown>, wIdx, seenIds)
           )
         };
       });
@@ -541,6 +692,9 @@ export function normalizeLegoSchema(rawJson: unknown): IHJSchema {
       );
 
       if (isCompositeModules) {
+        if (data.componentsTree.length > 100) {
+          throw new Error(`模块数量超出限制（最多支持 100 个模块，当前包含 ${data.componentsTree.length} 个）`);
+        }
         const moduleWidgets: IWidget[] = [];
         let currentTop = 40;
         data.componentsTree.forEach((mod: unknown) => {
@@ -550,23 +704,41 @@ export function normalizeLegoSchema(rawJson: unknown): IHJSchema {
             currentTop = nextTop;
           }
         });
+        if (moduleWidgets.length > 500) {
+          throw new Error(`转换后的组件数量超出限制（单页最多支持 500 个组件，当前包含 ${moduleWidgets.length} 个）`);
+        }
+        moduleWidgets.forEach((w) => {
+          if (seenIds.has(w.id)) {
+            w.id = `${w.id}-dup-${Math.random().toString(36).substring(2, 6)}`;
+          }
+          seenIds.add(w.id);
+        });
         pages = [{ id: 'page-1', componentName: 'page', commentType: 'page', children: moduleWidgets }];
       } else {
         // componentsTree is directly an array of Lego widgets
+        if (data.componentsTree.length > 500) {
+          throw new Error(`组件数量超出限制（最多支持 500 个组件，当前包含 ${data.componentsTree.length} 个）`);
+        }
         const widgets = data.componentsTree.map((w: unknown, wIdx: number) =>
-          ensureValidWidget(w as Record<string, unknown>, wIdx)
+          ensureValidWidget(w as Record<string, unknown>, wIdx, seenIds)
         );
         pages = [{ id: 'page-1', componentName: 'page', commentType: 'page', children: widgets }];
       }
     }
   } else if (Array.isArray(data.children)) {
+    if (data.children.length > 500) {
+      throw new Error(`组件数量超出限制（最多支持 500 个组件，当前包含 ${data.children.length} 个）`);
+    }
     const widgets = data.children.map((w: unknown, wIdx: number) =>
-      ensureValidWidget(w as Record<string, unknown>, wIdx)
+      ensureValidWidget(w as Record<string, unknown>, wIdx, seenIds)
     );
     pages = [{ id: 'page-1', componentName: 'page', commentType: 'page', children: widgets }];
   } else if (Array.isArray(data.widgets)) {
+    if (data.widgets.length > 500) {
+      throw new Error(`组件数量超出限制（最多支持 500 个组件，当前包含 ${data.widgets.length} 个）`);
+    }
     const widgets = data.widgets.map((w: unknown, wIdx: number) =>
-      ensureValidWidget(w as Record<string, unknown>, wIdx)
+      ensureValidWidget(w as Record<string, unknown>, wIdx, seenIds)
     );
     pages = [{ id: 'page-1', componentName: 'page', commentType: 'page', children: widgets }];
   } else {
@@ -583,6 +755,17 @@ export function normalizeLegoSchema(rawJson: unknown): IHJSchema {
       }
     });
 
+    if (fallbackWidgets.length > 500) {
+      throw new Error(`转换后的组件数量超出限制（单页最多支持 500 个组件，当前包含 ${fallbackWidgets.length} 个）`);
+    }
+
+    fallbackWidgets.forEach((w) => {
+      if (seenIds.has(w.id)) {
+        w.id = `${w.id}-dup-${Math.random().toString(36).substring(2, 6)}`;
+      }
+      seenIds.add(w.id);
+    });
+
     pages = [{ id: 'page-1', componentName: 'page', commentType: 'page', children: fallbackWidgets }];
   }
 
@@ -590,7 +773,7 @@ export function normalizeLegoSchema(rawJson: unknown): IHJSchema {
     pages = [{ id: 'page-1', componentName: 'page', commentType: 'page', children: [] }];
   }
 
-  // Ensure canvas height expands to fit all widgets cleanly
+  // Ensure canvas height expands to fit all widgets cleanly without uncontrolled drift
   let maxWidgetBottom = 0;
   pages.forEach((page) => {
     (page.children || []).forEach((w) => {
@@ -599,8 +782,10 @@ export function normalizeLegoSchema(rawJson: unknown): IHJSchema {
     });
   });
 
-  if (maxWidgetBottom > 0) {
-    safeCss.height = Math.max(safeHeight, maxWidgetBottom + 80);
+  if (maxWidgetBottom > safeHeight) {
+    safeCss.height = Math.max(safeHeight, maxWidgetBottom + 40);
+  } else {
+    safeCss.height = safeHeight;
   }
 
   return {
@@ -614,4 +799,168 @@ export function normalizeLegoSchema(rawJson: unknown): IHJSchema {
     meta: (data.meta as Record<string, unknown>) || {},
     dataSource: (data.dataSource as Record<string, unknown>) || {}
   };
+}
+
+export function validateAndNormalizeLegoJson(rawJson: unknown): { success: boolean; data?: IHJSchema; error?: string } {
+  if (!rawJson || typeof rawJson !== 'object' || Array.isArray(rawJson)) {
+    return { success: false, error: '导入的 JSON 必须是非空对象' };
+  }
+
+  // Unwrap supported wrapper formats first (e.g. { template_json: schema }, { lego_json: schema }, { data: schema })
+  const rawObj = unwrapLegoSchemaWrapper(rawJson);
+  const keys = Object.keys(rawObj);
+  if (keys.length === 0) {
+    return { success: false, error: '导入的 JSON 为空对象，未包含积木画布数据' };
+  }
+
+  // Pre-check page count if componentsTree is present
+  if (Array.isArray(rawObj.componentsTree) && rawObj.componentsTree.length > 20) {
+    return {
+      success: false,
+      error: `积木数据超出最大允许页数限制（最多支持 20 页，当前包含 ${rawObj.componentsTree.length} 页）`
+    };
+  }
+
+  // Must contain recognizable Lego structure or composite resume modules
+  const hasCanvasStructure =
+    Array.isArray(rawObj.componentsTree) ||
+    Array.isArray(rawObj.children) ||
+    Array.isArray(rawObj.widgets) ||
+    keys.some(
+      (k) =>
+        k.startsWith('BASE_') ||
+        k.startsWith('WORK_') ||
+        k.startsWith('EDU_') ||
+        k.startsWith('SKILL_') ||
+        k.startsWith('PROJECT_') ||
+        k === 'BaseInfo_1' ||
+        k === 'id' && (rawObj.componentsTree !== undefined || rawObj.children !== undefined)
+    );
+
+  if (!hasCanvasStructure) {
+    return { success: false, error: '导入的 JSON 不包含有效的积木画布组件结构' };
+  }
+
+  try {
+    const normalized = normalizeLegoSchema(rawJson);
+    if (!normalized.componentsTree || normalized.componentsTree.length === 0) {
+      return { success: false, error: 'JSON 中未包含有效的页面结构' };
+    }
+
+    const totalWidgets = normalized.componentsTree.reduce(
+      (sum, p) => sum + (Array.isArray(p.children) ? p.children.length : 0),
+      0
+    );
+
+    if (totalWidgets === 0) {
+      return { success: false, error: '导入的积木数据不包含任何有效组件' };
+    }
+
+    return { success: true, data: normalized };
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : '解析 Schema 失败' };
+  }
+}
+
+export interface StructuredResumeValidationResult {
+  success: boolean;
+  data?: FinalResume;
+  error?: string;
+}
+
+/**
+ * Strictly validates and normalizes a structured resume JSON object.
+ * Rejects empty objects, objects missing personalInfo/name, or invalid collection types.
+ * Normalizes all fields to ensure no undefined crashes in downstream UI.
+ */
+export function validateAndNormalizeStructuredResume(rawInput: unknown): StructuredResumeValidationResult {
+  if (!rawInput || typeof rawInput !== 'object' || Array.isArray(rawInput)) {
+    return { success: false, error: '导入的 JSON 必须是一个非空对象' };
+  }
+
+  const rawObj = rawInput as Record<string, unknown>;
+  // Unwrap nested finalResume or resumeData if present
+  let candidate: Record<string, unknown> = rawObj;
+  if (rawObj.finalResume && typeof rawObj.finalResume === 'object' && !Array.isArray(rawObj.finalResume)) {
+    candidate = rawObj.finalResume as Record<string, unknown>;
+  } else if (rawObj.resumeData && typeof rawObj.resumeData === 'object' && !Array.isArray(rawObj.resumeData)) {
+    candidate = rawObj.resumeData as Record<string, unknown>;
+  }
+
+  if (Object.keys(candidate).length === 0) {
+    return { success: false, error: '导入的 JSON 为空对象，未包含简历字段数据' };
+  }
+
+  const personalInfo = candidate.personalInfo as Record<string, unknown> | undefined;
+  if (!personalInfo || typeof personalInfo !== 'object' || Array.isArray(personalInfo)) {
+    return { success: false, error: '导入的简历缺少个人基本信息 (personalInfo) 对象' };
+  }
+
+  const name = typeof personalInfo.name === 'string' ? personalInfo.name.trim() : '';
+  if (!name) {
+    return { success: false, error: '导入的简历个人信息缺少有效的姓名 (personalInfo.name)' };
+  }
+
+  if (candidate.workExperience !== undefined && !Array.isArray(candidate.workExperience)) {
+    return { success: false, error: '工作经历 (workExperience) 格式错误，必须为数组' };
+  }
+
+  if (candidate.projectExperience !== undefined && !Array.isArray(candidate.projectExperience)) {
+    return { success: false, error: '项目经历 (projectExperience) 格式错误，必须为数组' };
+  }
+
+  if (candidate.coreSkills !== undefined && !Array.isArray(candidate.coreSkills)) {
+    return { success: false, error: '核心技能 (coreSkills) 格式错误，必须为数组' };
+  }
+
+  const edu = (candidate.education || {}) as Record<string, unknown>;
+
+  const normalized: FinalResume = {
+    personalInfo: {
+      name,
+      email: typeof personalInfo.email === 'string' ? personalInfo.email.trim() : '',
+      phone: typeof personalInfo.phone === 'string' ? personalInfo.phone.trim() : '',
+      location: typeof personalInfo.location === 'string' ? personalInfo.location.trim() : '',
+      avatarUrl: typeof personalInfo.avatarUrl === 'string' ? personalInfo.avatarUrl.trim() : undefined,
+    },
+    jobIntent: typeof candidate.jobIntent === 'string' ? candidate.jobIntent.trim() : '',
+    summary: typeof candidate.summary === 'string' ? candidate.summary.trim() : '',
+    coreSkills: Array.isArray(candidate.coreSkills)
+      ? candidate.coreSkills.map((s) => String(s || '').trim()).filter(Boolean)
+      : [],
+    workExperience: Array.isArray(candidate.workExperience)
+      ? candidate.workExperience.map((item: unknown) => {
+          const w = (item || {}) as Record<string, unknown>;
+          const bullets = Array.isArray(w.bullets) ? w.bullets.map((b) => String(b || '').trim()).filter(Boolean) : [];
+          return {
+            company: String(w.company || '').trim(),
+            role: String(w.role || '').trim(),
+            period: String(w.period || '').trim(),
+            bullets,
+          };
+        })
+      : [],
+    projectExperience: Array.isArray(candidate.projectExperience)
+      ? candidate.projectExperience.map((item: unknown) => {
+          const p = (item || {}) as Record<string, unknown>;
+          const bullets = Array.isArray(p.bullets) ? p.bullets.map((b) => String(b || '').trim()).filter(Boolean) : [];
+          return {
+            name: String(p.name || '').trim(),
+            role: String(p.role || '').trim(),
+            period: String(p.period || '').trim(),
+            bullets,
+          };
+        })
+      : [],
+    skillsAndTools: Array.isArray(candidate.skillsAndTools)
+      ? candidate.skillsAndTools.map((s) => String(s || '').trim()).filter(Boolean)
+      : [],
+    education: {
+      school: String(edu.school || '').trim(),
+      degree: String(edu.degree || '').trim(),
+      period: String(edu.period || '').trim(),
+    },
+  };
+
+  return { success: true, data: normalized };
 }

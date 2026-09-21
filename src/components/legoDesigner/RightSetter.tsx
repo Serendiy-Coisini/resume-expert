@@ -1,6 +1,7 @@
 import React, { useRef, useState, useEffect } from 'react';
 import { sanitizeRichText } from '@/lib/safe-html';
 import { useLegoDesignerStore } from '@/store/lego-designer-store';
+import { useShallow } from 'zustand/react/shallow';
 import { useResumeStore } from '@/store/resume-store';
 import { PhotoManagerDialog } from './PhotoManagerDialog';
 import { applyThemeColorToSchema, THEME_COLOR_PRESETS, hslToHex, hexToHsl } from '@/lib/theme-utils';
@@ -37,17 +38,20 @@ interface RightSetterThemeSectionProps {
   setSchema: (schema: IHJSchema, saveHistory?: boolean) => void;
   currentThemeColor: string;
   setTemplateOptions: (opts: { themeColor?: string; [key: string]: unknown }) => void;
+  commitHistorySnapshot: (previousSchema: IHJSchema) => void;
 }
 
 const RightSetterThemeSection: React.FC<RightSetterThemeSectionProps> = ({
   schema,
   setSchema,
   currentThemeColor,
-  setTemplateOptions
+  setTemplateOptions,
+  commitHistorySnapshot
 }) => {
   const rafRef = useRef<number | null>(null);
   const [localColor, setLocalColor] = useState(currentThemeColor);
   const lastPreviewColorRef = useRef(currentThemeColor);
+  const baselineSchemaRef = useRef<IHJSchema | null>(null);
 
   useEffect(() => {
     setLocalColor(currentThemeColor);
@@ -55,6 +59,9 @@ const RightSetterThemeSection: React.FC<RightSetterThemeSectionProps> = ({
   }, [currentThemeColor]);
 
   const handlePreviewColor = (color: string) => {
+    if (!baselineSchemaRef.current) {
+      baselineSchemaRef.current = JSON.parse(JSON.stringify(schema));
+    }
     setLocalColor(color);
     lastPreviewColorRef.current = color;
     if (rafRef.current) {
@@ -74,8 +81,14 @@ const RightSetterThemeSection: React.FC<RightSetterThemeSectionProps> = ({
     const finalColor = color || lastPreviewColorRef.current;
     setLocalColor(finalColor);
     lastPreviewColorRef.current = finalColor;
+
+    const baseline = baselineSchemaRef.current || JSON.parse(JSON.stringify(schema));
+    baselineSchemaRef.current = null;
+
+    commitHistorySnapshot(baseline);
+
     const updated = applyThemeColorToSchema(schema, finalColor);
-    setSchema(updated, true);
+    setSchema(updated, false);
     setTemplateOptions({ themeColor: finalColor });
   };
 
@@ -144,8 +157,11 @@ const RightSetterThemeSection: React.FC<RightSetterThemeSectionProps> = ({
           value={localHsl.h}
           onChange={(e) => handleHuePreview(Number(e.target.value))}
           onPointerUp={() => handleCommitColor(lastPreviewColorRef.current)}
-          onMouseUp={() => handleCommitColor(lastPreviewColorRef.current)}
-          onTouchEnd={() => handleCommitColor(lastPreviewColorRef.current)}
+          onKeyUp={(e) => {
+            if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End'].includes(e.key)) {
+              handleCommitColor(lastPreviewColorRef.current);
+            }
+          }}
           className="w-full h-2.5 rounded-lg appearance-none cursor-pointer accent-blue-600"
           style={{
             background: 'linear-gradient(to right, #ef4444 0%, #f59e0b 17%, #eab308 33%, #10b981 50%, #06b6d4 67%, #3b82f6 83%, #ec4899 92%, #ef4444 100%)'
@@ -234,8 +250,25 @@ export const RightSetter: React.FC<RightSetterProps> = ({
     schema,
     setSchema,
     batchUpdateWidgetCss,
-    updatePagePadding
-  } = useLegoDesignerStore();
+    updatePagePadding,
+    commitHistorySnapshot
+  } = useLegoDesignerStore(
+    useShallow((s) => ({
+      getSelectedWidget: s.getSelectedWidget,
+      updateWidgetCss: s.updateWidgetCss,
+      updateWidgetDataSource: s.updateWidgetDataSource,
+      selectedWidgetId: s.selectedWidgetId,
+      selectedWidgetIds: s.selectedWidgetIds,
+      isFormatPainterActive: s.isFormatPainterActive,
+      toggleFormatPainter: s.toggleFormatPainter,
+      alignWidgets: s.alignWidgets,
+      schema: s.schema,
+      setSchema: s.setSchema,
+      batchUpdateWidgetCss: s.batchUpdateWidgetCss,
+      updatePagePadding: s.updatePagePadding,
+      commitHistorySnapshot: s.commitHistorySnapshot
+    }))
+  );
   const setUserInput = useResumeStore((s) => s.setUserInput);
   const templateOptions = useResumeStore((s) => s.templateOptions);
   const setTemplateOptions = useResumeStore((s) => s.setTemplateOptions);
@@ -619,6 +652,7 @@ export const RightSetter: React.FC<RightSetterProps> = ({
             setSchema={setSchema}
             currentThemeColor={currentThemeColor}
             setTemplateOptions={setTemplateOptions}
+            commitHistorySnapshot={commitHistorySnapshot}
           />
 
           {/* 2. Photo / Avatar Management Card */}

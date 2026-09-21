@@ -3,8 +3,8 @@
  * Limits requests per client IP to prevent denial of service and API quota exhaustion.
  */
 
-import { createHash } from "node:crypto";
 import { isIP } from "node:net";
+import { verifyServerAccessToken } from "@/lib/ai/server-access";
 
 interface RateLimitOptions {
   /** Maximum allowed requests within the time window */
@@ -47,8 +47,9 @@ if (typeof setInterval !== "undefined") {
  * Extracts client IP from standard proxy headers or falls back to loopback.
  */
 export function getClientIp(req: Request): string {
-  const credential = req.headers.get("x-server-access-token") || req.headers.get("x-llm-config");
-  if (credential && credential.length <= 16_384) return `credential:${createHash("sha256").update(credential).digest("hex")}`;
+  const token = req.headers.get("x-server-access-token");
+  const authenticatedPrincipal = verifyServerAccessToken(token);
+  if (authenticatedPrincipal) return `credential:${authenticatedPrincipal}`;
   if (process.env.TRUST_PROXY_HEADERS !== "true") return "untrusted-client";
   const xForwardedFor = req.headers.get("x-forwarded-for");
   if (xForwardedFor) {

@@ -1,4 +1,4 @@
-import type { AnalysisResult, UserInput, TemplateId } from '@/types/resume';
+import type { AnalysisResult, UserInput, TemplateId, Resume } from '@/types/resume';
 import type { TemplateOptions } from '@/lib/resume-templates';
 import { DEFAULT_TEMPLATE_OPTIONS } from '@/lib/resume-templates';
 import type { IHJSchema, IWidget } from '@/types/lego';
@@ -112,8 +112,9 @@ function calculateSummaryHeight(
   lineHeightPx: number = 20
 ): number {
   const usableWidth = Math.max(180, cardWidthPx - 24);
-  const charWidthPx = fontSizePx * 0.92;
-  const charsPerLine = Math.max(15, Math.floor(usableWidth / charWidthPx));
+  // Conservative CJK char width to prevent underestimating rendered height
+  const charWidthPx = fontSizePx * 0.90;
+  const charsPerLine = Math.max(10, Math.floor(usableWidth / charWidthPx));
   const paras = (summaryText || "").split(/\r?\n/).map((p) => p.trim()).filter(Boolean);
 
   let totalLines = 0;
@@ -122,7 +123,8 @@ function calculateSummaryHeight(
   });
   if (totalLines === 0) totalLines = 1;
 
-  return Math.max(35, Math.ceil(totalLines * lineHeightPx + 14));
+  // 1.15x safety margin prevents text from clipping or overlapping subsequent widgets
+  return Math.max(35, Math.ceil(totalLines * lineHeightPx * 1.15 + 14));
 }
 
 /**
@@ -157,6 +159,20 @@ export function calculateTagWidth(text: string, fontSizePx: number = 11.5): numb
   return Math.max(72, Math.min(740, totalWidth));
 }
 
+export const A4_RATIO = 297 / 210;
+
+/**
+ * Calculates standard A4 page height based on canvas width (1160px for standard 820px width).
+ */
+export function calculateA4PageHeight(canvasWidth: number = 820): number {
+  const safeWidth = Math.max(100, Math.round(canvasWidth || 820));
+  return Math.round((safeWidth * 297) / 210);
+}
+
+/**
+ * @deprecated Use `calculateA4PageHeight(canvasWidth)` instead.
+ * Hardcoding 1160 is only valid for standard 820px canvas.
+ */
 export const A4_PAGE_HEIGHT = 1160;
 export const PAGE_SAFE_TOP_MARGIN = 35;
 export const PAGE_SAFE_BOTTOM_MARGIN = 35;
@@ -226,6 +242,8 @@ export function reflowCanvasWidgetsForPagination(schema: IHJSchema): IHJSchema {
   }
 
   const widgets = page.children;
+  const canvasWidth = Number(cloned.css?.width) || 820;
+  const pageHeight = calculateA4PageHeight(canvasWidth);
 
   const isTwoColumn = widgets.some(
     (w) =>
@@ -535,8 +553,8 @@ export function reflowCanvasWidgetsForPagination(schema: IHJSchema): IHJSchema {
       if (sec.titleUnit) {
         const curTitleTop = sec.titleUnit.origTop + currentShift;
         const titleH = sec.titleUnit.height;
-        const pageIndex = Math.floor(curTitleTop / A4_PAGE_HEIGHT);
-        const pageCutoff = (pageIndex + 1) * A4_PAGE_HEIGHT - PAGE_SAFE_BOTTOM_MARGIN;
+        const pageIndex = Math.floor(curTitleTop / pageHeight);
+        const pageCutoff = (pageIndex + 1) * pageHeight - PAGE_SAFE_BOTTOM_MARGIN;
 
         // 前瞻检测：标题后必须能完整容纳首条内容单元
         let minRequiredH = titleH;
@@ -548,7 +566,7 @@ export function reflowCanvasWidgetsForPagination(schema: IHJSchema): IHJSchema {
 
         if (curTitleTop + minRequiredH > pageCutoff) {
           // 当前页不足以展示“标题 + 首项”，标题整体避让推移至下一页起始安全区
-          const nextPageSafeTop = (pageIndex + 1) * A4_PAGE_HEIGHT + PAGE_SAFE_TOP_MARGIN;
+          const nextPageSafeTop = (pageIndex + 1) * pageHeight + PAGE_SAFE_TOP_MARGIN;
           const addedShift = nextPageSafeTop - curTitleTop;
           currentShift += addedShift;
         }
@@ -563,22 +581,22 @@ export function reflowCanvasWidgetsForPagination(schema: IHJSchema): IHJSchema {
       sec.items.forEach((item) => {
         const curItemTop = item.origTop + currentShift;
         const itemH = item.height;
-        const pageIndex = Math.floor(curItemTop / A4_PAGE_HEIGHT);
-        const pageCutoff = (pageIndex + 1) * A4_PAGE_HEIGHT - PAGE_SAFE_BOTTOM_MARGIN;
+        const pageIndex = Math.floor(curItemTop / pageHeight);
+        const pageCutoff = (pageIndex + 1) * pageHeight - PAGE_SAFE_BOTTOM_MARGIN;
 
-        const maxPageUsableH = A4_PAGE_HEIGHT - PAGE_SAFE_TOP_MARGIN - PAGE_SAFE_BOTTOM_MARGIN;
+        const maxPageUsableH = pageHeight - PAGE_SAFE_TOP_MARGIN - PAGE_SAFE_BOTTOM_MARGIN;
 
         if (itemH > maxPageUsableH) {
           // 超长巨型单组件：仅当其起始点不在页面顶部安全区附近时推进至新页面开头
-          const offsetInPage = curItemTop % A4_PAGE_HEIGHT;
+          const offsetInPage = curItemTop % pageHeight;
           if (offsetInPage > PAGE_SAFE_TOP_MARGIN + 20) {
-            const nextPageSafeTop = (pageIndex + 1) * A4_PAGE_HEIGHT + PAGE_SAFE_TOP_MARGIN;
+            const nextPageSafeTop = (pageIndex + 1) * pageHeight + PAGE_SAFE_TOP_MARGIN;
             const addedShift = nextPageSafeTop - curItemTop;
             currentShift += addedShift;
           }
         } else if (curItemTop + itemH > pageCutoff) {
           // 单元穿透 A4 切割线，整体推移至下一页起始安全区
-          const nextPageSafeTop = (pageIndex + 1) * A4_PAGE_HEIGHT + PAGE_SAFE_TOP_MARGIN;
+          const nextPageSafeTop = (pageIndex + 1) * pageHeight + PAGE_SAFE_TOP_MARGIN;
           const addedShift = nextPageSafeTop - curItemTop;
           currentShift += addedShift;
         }
@@ -607,7 +625,7 @@ export function reflowCanvasWidgetsForPagination(schema: IHJSchema): IHJSchema {
         // 如果该板块的经历跨越了多个 A4 页面，按页分段延伸时间轴线，杜绝竖线穿透页面白边/安全边距
         const cardsByPage = new Map<number, IWidget[]>();
         sectionCards.forEach((c) => {
-          const pIdx = Math.floor((Number(c.css.top) || 0) / A4_PAGE_HEIGHT);
+          const pIdx = Math.floor((Number(c.css.top) || 0) / pageHeight);
           if (!cardsByPage.has(pIdx)) cardsByPage.set(pIdx, []);
           cardsByPage.get(pIdx)!.push(c);
         });
@@ -650,8 +668,8 @@ export function reflowCanvasWidgetsForPagination(schema: IHJSchema): IHJSchema {
       (w) => w !== sidebarBg && !((w.id || '').includes('sidebar-bg') || (w.title || '').includes('侧边栏背景'))
     );
     const maxBottom = Math.max(0, ...contentWidgets.map((w) => (Number(w.css.top) || 0) + (Number(w.css.height) || 0)));
-    const totalPages = Math.max(1, Math.ceil(maxBottom / A4_PAGE_HEIGHT));
-    const finalHeight = totalPages * A4_PAGE_HEIGHT;
+    const totalPages = Math.max(1, Math.ceil(maxBottom / pageHeight));
+    const finalHeight = totalPages * pageHeight;
 
     cloned.css.height = finalHeight;
     if (sidebarBg) {
@@ -684,11 +702,159 @@ export function reflowCanvasWidgetsForPagination(schema: IHJSchema): IHJSchema {
       return true;
     });
     const maxBottom = Math.max(0, ...contentWidgets.map((w) => (Number(w.css.top) || 0) + (Number(w.css.height) || 0)));
-    const totalPages = Math.max(1, Math.ceil(maxBottom / A4_PAGE_HEIGHT));
-    cloned.css.height = totalPages * A4_PAGE_HEIGHT;
+    const totalPages = Math.max(1, Math.ceil(maxBottom / pageHeight));
+    cloned.css.height = totalPages * pageHeight;
   }
 
   return cloned;
+}
+
+export function isDecorativeOrBackgroundWidget(w: IWidget): boolean {
+  const binding = (w.binding || '').toLowerCase();
+  if (
+    binding === 'work-bg' ||
+    binding === 'project-bg' ||
+    binding === 'work-dot' ||
+    binding === 'project-dot' ||
+    binding === 'work-timeline-line' ||
+    binding === 'project-timeline-line' ||
+    binding.endsWith('-bg') ||
+    binding.endsWith('-line') ||
+    binding.endsWith('-dot')
+  ) {
+    return true;
+  }
+  const comp = (w.componentName || '').toLowerCase();
+  if (
+    comp === 'hj-rectangle' ||
+    comp === 'hj-circle' ||
+    comp === 'hj-bg' ||
+    comp === 'hj-line-1' ||
+    comp.includes('line') ||
+    comp.includes('circle')
+  ) {
+    return true;
+  }
+  const title = (w.title || '').toLowerCase();
+  const id = (w.id || '').toLowerCase();
+  if (
+    title.includes('背景') ||
+    title.includes('线') ||
+    title.includes('轴线') ||
+    title.includes('圆点') ||
+    title.includes('节点') ||
+    id.includes('-bg') ||
+    id.includes('_bg') ||
+    id.includes('timeline-line') ||
+    id.includes('dot-') ||
+    id.includes('-dot')
+  ) {
+    return true;
+  }
+  return false;
+}
+
+export function extractResumeFromLegoSchema(schema: IHJSchema, baseResume?: Resume | null): Resume {
+  const result: Resume = baseResume ? JSON.parse(JSON.stringify(baseResume)) : {
+    personalInfo: { name: '', email: '', phone: '', location: '' },
+    jobIntent: '',
+    summary: '',
+    coreSkills: [],
+    workExperience: [],
+    projectExperience: [],
+    skillsAndTools: [],
+    education: { school: '', degree: '', period: '' }
+  };
+
+  if (!schema?.componentsTree) return result;
+
+  const allWidgets: IWidget[] = [];
+  for (const page of schema.componentsTree) {
+    if (page?.children) allWidgets.push(...page.children);
+  }
+
+  // Name
+  const nameWidget = allWidgets.find((w) => (w.id || '').includes('name') || (w.title || '').includes('姓名'));
+  if (nameWidget && typeof nameWidget.dataSource?.text === 'string' && nameWidget.dataSource.text.trim()) {
+    const rawName = nameWidget.dataSource.text.split(/·|\n/)[0].trim();
+    if (rawName) result.personalInfo.name = rawName;
+  }
+
+  // Job Intent
+  const intentWidget = allWidgets.find((w) => ((w.id || '').includes('intent') || (w.title || '').includes('意向')) && !(w.title || '').includes('联系'));
+  if (intentWidget && typeof intentWidget.dataSource?.text === 'string') {
+    const rawIntent = intentWidget.dataSource.text.replace(/^[🎯\s]*意向[:：]?\s*/, '').replace(/^求职意向[:：]?\s*/, '').trim();
+    if (rawIntent) result.jobIntent = rawIntent;
+  }
+
+  // Summary
+  const summaryWidget = allWidgets.find((w) =>
+    ((w.id || '').includes('summary') || (w.title || '').includes('自我评价') || (w.title || '').includes('优势') || (w.title || '').includes('摘要')) &&
+    !(w.title || '').includes('标题') && !(w.title || '').includes('线')
+  );
+  if (summaryWidget && typeof summaryWidget.dataSource?.text === 'string') {
+    const rawSummary = summaryWidget.dataSource.text.replace(/^【自我评价】\s*/, '').trim();
+    if (rawSummary) result.summary = rawSummary;
+  }
+
+  // Work experience
+  const workTextWidgets = allWidgets.filter((w) => {
+    if (isDecorativeOrBackgroundWidget(w)) return false;
+    const title = (w.title || '').toLowerCase();
+    const id = (w.id || '').toLowerCase();
+    const comp = (w.componentName || '').toLowerCase();
+    return (
+      !title.includes('标题') &&
+      !title.includes('线') &&
+      !title.includes('项目') &&
+      !title.includes('教育') &&
+      !id.includes('line') &&
+      !id.includes('title') &&
+      (comp.includes('exper') || id.includes('work') || title.includes('工作') || title.includes('经历卡片'))
+    );
+  });
+
+  if (workTextWidgets.length > 0) {
+    const extractedWorks = workTextWidgets.map((w, idx) => {
+      const company = (w.dataSource?.companyName as string) || (baseResume?.workExperience?.[idx]?.company) || '公司';
+      const role = (w.dataSource?.jobTitle as string) || (baseResume?.workExperience?.[idx]?.role) || '岗位';
+      const period = (w.dataSource?.workTime as string) || (baseResume?.workExperience?.[idx]?.period) || '';
+      let bullets: string[] = [];
+      const content = (w.dataSource?.workContent as string) || (w.dataSource?.text as string) || '';
+      if (content) {
+        bullets = content
+          .split('\n')
+          .map((b) => b.replace(/^[•\-\*]\s*/, '').trim())
+          .filter(Boolean);
+      }
+      return { company, role, period, bullets };
+    });
+    if (extractedWorks.length > 0) result.workExperience = extractedWorks;
+  }
+
+  return result;
+}
+
+export function hasManualCanvasEdits(schema: IHJSchema, originalResume?: Resume | null): boolean {
+  if (!originalResume || !schema?.componentsTree) return false;
+  const current = extractResumeFromLegoSchema(schema, originalResume);
+  if (current.summary && originalResume.summary && current.summary.trim() !== originalResume.summary.trim()) {
+    return true;
+  }
+  if (current.personalInfo.name && originalResume.personalInfo.name && current.personalInfo.name.trim() !== originalResume.personalInfo.name.trim()) {
+    return true;
+  }
+  if (current.workExperience.length !== (originalResume.workExperience || []).length) {
+    return true;
+  }
+  for (let i = 0; i < current.workExperience.length; i++) {
+    const cw = current.workExperience[i];
+    const ow = originalResume.workExperience[i];
+    if (!ow) return true;
+    if (cw.company !== ow.company || cw.role !== ow.role) return true;
+    if (cw.bullets.join('\n') !== ow.bullets.join('\n')) return true;
+  }
+  return false;
 }
 
 export function fillAiDataIntoExistingSchema(
@@ -752,7 +918,6 @@ export function fillAiDataIntoExistingSchema(
   });
 
   // 2. Composite Intent + Contact Widgets (e.g. '意向与联系方式' in corporate-banner)
-  // Must match BEFORE individual intent/contact widgets to prevent wiping out contact details!
   page.children.filter(isUnused).forEach((widget) => {
     const title = (widget.title || '').toLowerCase();
     const id = (widget.id || '').toLowerCase();
@@ -805,6 +970,7 @@ export function fillAiDataIntoExistingSchema(
 
   // 5. Contact / Basic Info Widget
   page.children.filter(isUnused).forEach((widget) => {
+    if (isDecorativeOrBackgroundWidget(widget)) return;
     const title = (widget.title || '').toLowerCase();
     const id = (widget.id || '').toLowerCase();
     const currentText = typeof widget.dataSource?.text === 'string' ? widget.dataSource.text : '';
@@ -825,6 +991,7 @@ export function fillAiDataIntoExistingSchema(
 
   // 6. Summary / Profile Widget
   page.children.filter(isUnused).forEach((widget) => {
+    if (isDecorativeOrBackgroundWidget(widget)) return;
     const title = (widget.title || '').toLowerCase();
     const id = (widget.id || '').toLowerCase();
     const currentText = typeof widget.dataSource?.text === 'string' ? widget.dataSource.text : '';
@@ -851,144 +1018,598 @@ export function fillAiDataIntoExistingSchema(
   });
 
   // 7. Work Experience Widgets
-  const workCandidates = page.children.filter(isUnused).filter((widget) => {
-    const title = (widget.title || '').toLowerCase();
-    const id = (widget.id || '').toLowerCase();
-    const compName = (widget.componentName || '').toLowerCase();
+  const isGridWork = page.children.some(
+    (w) => w.id.startsWith('widget-grid-work-') || w.binding === 'work-bg' || w.binding === 'work-header'
+  );
+  const isTimelineWork = page.children.some(
+    (w) => w.id.includes('tl-dot-work') || w.id.includes('work-tl-') || w.binding === 'work-dot'
+  );
 
-    return (
-      !title.includes('标题') &&
-      !title.includes('线') &&
-      !title.includes('项目') &&
-      !title.includes('教育') &&
-      !id.includes('line') &&
-      !id.includes('title') &&
-      (compName.includes('exper') || id.includes('work') || title.includes('经历卡片') || title.includes('工作'))
-    );
-  });
+  if (isGridWork) {
+    if (workList.length === 0) {
+      page.children = page.children.filter(
+        (w) => !(w.id.startsWith('widget-grid-work-') || w.binding?.startsWith('work-'))
+      );
+    } else {
+      interface GridWorkGroup {
+        bg?: IWidget;
+        header?: IWidget;
+        content?: IWidget;
+      }
+      const groups: GridWorkGroup[] = [];
+      for (let i = 0; i < 50; i++) {
+        const bg = page.children.find((w) => w.id === `widget-grid-work-bg-${i}` || (w.binding === 'work-bg' && w.customProps?.groupIndex === i));
+        const header = page.children.find((w) => w.id === `widget-grid-work-header-${i}` || (w.binding === 'work-header' && w.customProps?.groupIndex === i));
+        const content = page.children.find((w) => w.id === `widget-grid-work-content-${i}` || (w.binding === 'work-content' && w.customProps?.groupIndex === i));
+        if (!bg && !header && !content) break;
+        groups.push({ bg, header, content });
+      }
 
-  workCandidates.forEach((widget, idx) => {
-    if (idx < workList.length) {
-      const w = workList[idx];
-      const formattedBullets = w.bullets.map((b) => (b.trim().startsWith('•') || b.trim().startsWith('1.') || b.trim().startsWith('2.')) ? b : `• ${b}`).join('\n');
-      const cardWidth = widget.css.width || 740;
-      const fontSz = widget.css.fontSize || 12.5;
-      const cardH = calculateCardHeight(w.company, w.role, w.period, w.bullets, cardWidth, fontSz, 20);
+      for (let idx = 0; idx < workList.length; idx++) {
+        const w = workList[idx];
+        const formattedBullets = w.bullets.map((b) => (b.trim().startsWith('•') || b.trim().startsWith('1.') || b.trim().startsWith('2.')) ? b : `• ${b}`).join('\n');
+        const cardH = calculateCardHeight(w.company, w.role, w.period, w.bullets, 770, 12.5, 20);
 
-      widget.css.height = Math.max(65, cardH);
-      widget.dataSource.companyName = w.company;
-      widget.dataSource.jobTitle = w.role;
-      widget.dataSource.workTime = w.period;
-      widget.dataSource.workContent = formattedBullets;
-      widget.dataSource.text = `${w.company} · ${w.role}\n${formattedBullets}`;
-      markUsed(widget);
+        if (idx < groups.length) {
+          const grp = groups[idx];
+          if (grp.header) {
+            grp.header.dataSource.text = `${w.company}  ·  ${w.role}  (${w.period})`;
+            markUsed(grp.header);
+          }
+          if (grp.content) {
+            grp.content.css.height = Math.max(30, cardH - 52);
+            grp.content.dataSource = {
+              companyName: w.company,
+              jobTitle: w.role,
+              workTime: w.period,
+              workContent: formattedBullets,
+              text: formattedBullets
+            };
+            markUsed(grp.content);
+          }
+          if (grp.bg) {
+            grp.bg.css.height = cardH;
+            markUsed(grp.bg);
+          }
+        } else if (groups.length > 0) {
+          const prevGrp = groups[idx - 1] || groups[groups.length - 1];
+          const prevBottom = Math.max(
+            (Number(prevGrp.bg?.css.top) || 0) + (Number(prevGrp.bg?.css.height) || 0),
+            (Number(prevGrp.content?.css.top) || 0) + (Number(prevGrp.content?.css.height) || 0)
+          );
+          const newTop = prevBottom + 12;
+
+          let newBg: IWidget | undefined;
+          let newHeader: IWidget | undefined;
+          let newContent: IWidget | undefined;
+
+          if (prevGrp.bg) {
+            newBg = JSON.parse(JSON.stringify(prevGrp.bg));
+            newBg!.id = `widget-grid-work-bg-${idx}`;
+            newBg!.title = `工作卡片背景 ${idx + 1}`;
+            newBg!.css.top = newTop;
+            newBg!.css.height = cardH;
+            newBg!.binding = 'work-bg';
+            markUsed(newBg!);
+          }
+          if (prevGrp.header) {
+            newHeader = JSON.parse(JSON.stringify(prevGrp.header));
+            newHeader!.id = `widget-grid-work-header-${idx}`;
+            newHeader!.title = `工作信息头部 ${idx + 1}`;
+            newHeader!.css.top = newTop + 12;
+            newHeader!.binding = 'work-header';
+            newHeader!.dataSource = { text: `${w.company}  ·  ${w.role}  (${w.period})` };
+            markUsed(newHeader!);
+          }
+          if (prevGrp.content) {
+            newContent = JSON.parse(JSON.stringify(prevGrp.content));
+            newContent!.id = `widget-grid-work-content-${idx}`;
+            newContent!.title = `工作要点内容 ${idx + 1}`;
+            newContent!.css.top = newTop + 40;
+            newContent!.css.height = Math.max(30, cardH - 52);
+            newContent!.binding = 'work-content';
+            newContent!.dataSource = {
+              companyName: w.company,
+              jobTitle: w.role,
+              workTime: w.period,
+              workContent: formattedBullets,
+              text: formattedBullets
+            };
+            markUsed(newContent!);
+          }
+
+          const lastWidget = prevGrp.content || prevGrp.header || prevGrp.bg;
+          const insertIdx = lastWidget ? page.children.indexOf(lastWidget) + 1 : page.children.length;
+          const toAdd = [newBg, newHeader, newContent].filter(Boolean) as IWidget[];
+          page.children.splice(insertIdx, 0, ...toAdd);
+          groups.push({ bg: newBg, header: newHeader, content: newContent });
+        }
+      }
+
+      if (groups.length > workList.length) {
+        const excessIds = new Set<string>();
+        for (let i = workList.length; i < groups.length; i++) {
+          if (groups[i].bg) excessIds.add(groups[i].bg!.id);
+          if (groups[i].header) excessIds.add(groups[i].header!.id);
+          if (groups[i].content) excessIds.add(groups[i].content!.id);
+        }
+        page.children = page.children.filter((w) => !excessIds.has(w.id));
+      }
     }
-  });
+  } else if (isTimelineWork) {
+    if (workList.length === 0) {
+      page.children = page.children.filter(
+        (w) => !(w.id.includes('tl-dot-work') || w.id.includes('work-tl-') || w.id.includes('timeline-line-work') || w.binding?.startsWith('work-'))
+      );
+    } else {
+      interface TimelineWorkGroup {
+        dot?: IWidget;
+        card?: IWidget;
+      }
+      const groups: TimelineWorkGroup[] = [];
+      for (let i = 0; i < 50; i++) {
+        const dot = page.children.find((w) => w.id === `widget-tl-dot-work-${i}` || (w.binding === 'work-dot' && w.customProps?.groupIndex === i));
+        const card = page.children.find((w) => w.id === `widget-work-tl-${i}` || (w.binding === 'work-card' && w.customProps?.groupIndex === i));
+        if (!dot && !card) break;
+        groups.push({ dot, card });
+      }
 
-  // Remove excess work candidate widgets if incoming has fewer
-  if (workCandidates.length > workList.length) {
-    const excessIds = new Set(workCandidates.slice(workList.length).map((w) => w.id));
-    page.children = page.children.filter((w) => !excessIds.has(w.id));
-  } else if (workList.length > workCandidates.length && workCandidates.length > 0) {
-    const templateWidget = workCandidates[workCandidates.length - 1];
-    const insertIdx = page.children.indexOf(templateWidget);
+      let lastCardBottom = 0;
+      for (let idx = 0; idx < workList.length; idx++) {
+        const w = workList[idx];
+        const formattedBullets = w.bullets.map((b) => (b.trim().startsWith('•') || b.trim().startsWith('1.') || b.trim().startsWith('2.')) ? b : `• ${b}`).join('\n');
+        const cardH = calculateCardHeight(w.company, w.role, w.period, w.bullets, 722, 12.5, 20);
 
-    let lastTop = Number(templateWidget.css.top) || 0;
-    let lastHeight = Number(templateWidget.css.height) || 100;
+        if (idx < groups.length) {
+          const grp = groups[idx];
+          if (grp.card) {
+            grp.card.css.height = cardH;
+            grp.card.dataSource = {
+              companyName: w.company,
+              jobTitle: w.role,
+              workTime: w.period,
+              workContent: formattedBullets,
+              text: `${w.company} · ${w.role}\n${formattedBullets}`
+            };
+            markUsed(grp.card);
+            lastCardBottom = (Number(grp.card.css.top) || 0) + cardH;
+          }
+          if (grp.dot) markUsed(grp.dot);
+        } else if (groups.length > 0) {
+          const prevGrp = groups[idx - 1] || groups[groups.length - 1];
+          const prevTop = Number(prevGrp.card?.css.top) || 0;
+          const prevHeight = Number(prevGrp.card?.css.height) || 80;
+          const newTop = prevTop + prevHeight + 10;
 
-    for (let idx = workCandidates.length; idx < workList.length; idx++) {
-      const w = workList[idx];
-      const formattedBullets = w.bullets.map((b) => (b.trim().startsWith('•') || b.trim().startsWith('1.') || b.trim().startsWith('2.')) ? b : `• ${b}`).join('\n');
-      const cardWidth = templateWidget.css.width || 740;
-      const fontSz = templateWidget.css.fontSize || 12.5;
-      const cardH = calculateCardHeight(w.company, w.role, w.period, w.bullets, cardWidth, fontSz, 20);
+          let newDot: IWidget | undefined;
+          let newCard: IWidget | undefined;
 
-      const extraWidget: IWidget = JSON.parse(JSON.stringify(templateWidget));
-      extraWidget.id = `widget-work-extra-${idx}-${Date.now()}`;
-      extraWidget.title = `工作 ${idx + 1}`;
-      extraWidget.css.top = lastTop + lastHeight + 12;
-      extraWidget.css.height = Math.max(65, cardH);
-      extraWidget.dataSource.companyName = w.company;
-      extraWidget.dataSource.jobTitle = w.role;
-      extraWidget.dataSource.workTime = w.period;
-      extraWidget.dataSource.workContent = formattedBullets;
-      extraWidget.dataSource.text = `${w.company} · ${w.role}\n${formattedBullets}`;
+          if (prevGrp.dot) {
+            newDot = JSON.parse(JSON.stringify(prevGrp.dot));
+            newDot!.id = `widget-tl-dot-work-${idx}`;
+            newDot!.css.top = newTop + 6;
+            newDot!.binding = 'work-dot';
+            markUsed(newDot!);
+          }
+          if (prevGrp.card) {
+            newCard = JSON.parse(JSON.stringify(prevGrp.card));
+            newCard!.id = `widget-work-tl-${idx}`;
+            newCard!.title = `工作 ${idx + 1}`;
+            newCard!.css.top = newTop;
+            newCard!.css.height = cardH;
+            newCard!.binding = 'work-card';
+            newCard!.dataSource = {
+              companyName: w.company,
+              jobTitle: w.role,
+              workTime: w.period,
+              workContent: formattedBullets,
+              text: `${w.company} · ${w.role}\n${formattedBullets}`
+            };
+            markUsed(newCard!);
+            lastCardBottom = newTop + cardH;
+          }
 
-      page.children.splice(insertIdx + 1 + (idx - workCandidates.length), 0, extraWidget);
-      markUsed(extraWidget);
+          const lastWidget = prevGrp.card || prevGrp.dot;
+          const insertIdx = lastWidget ? page.children.indexOf(lastWidget) + 1 : page.children.length;
+          const toAdd = [newDot, newCard].filter(Boolean) as IWidget[];
+          page.children.splice(insertIdx, 0, ...toAdd);
+          groups.push({ dot: newDot, card: newCard });
+        }
+      }
 
-      lastTop = extraWidget.css.top;
-      lastHeight = extraWidget.css.height;
+      if (groups.length > workList.length) {
+        const excessIds = new Set<string>();
+        for (let i = workList.length; i < groups.length; i++) {
+          if (groups[i].dot) excessIds.add(groups[i].dot!.id);
+          if (groups[i].card) excessIds.add(groups[i].card!.id);
+        }
+        page.children = page.children.filter((w) => !excessIds.has(w.id));
+      }
+
+      const workLine = page.children.find((w) => w.id === 'widget-timeline-line-work');
+      if (workLine && lastCardBottom > 0) {
+        const lineTop = Number(workLine.css.top) || 0;
+        workLine.css.height = Math.max(40, lastCardBottom - lineTop - 10);
+      }
+    }
+  } else {
+    const workCandidates = page.children.filter(isUnused).filter((widget) => {
+      if (isDecorativeOrBackgroundWidget(widget)) return false;
+      const title = (widget.title || '').toLowerCase();
+      const id = (widget.id || '').toLowerCase();
+      const compName = (widget.componentName || '').toLowerCase();
+
+      return (
+        !title.includes('标题') &&
+        !title.includes('线') &&
+        !title.includes('项目') &&
+        !title.includes('教育') &&
+        !id.includes('line') &&
+        !id.includes('title') &&
+        (compName.includes('exper') || id.includes('work') || title.includes('经历卡片') || title.includes('工作'))
+      );
+    });
+
+    if (workList.length === 0) {
+      const excessIds = new Set(workCandidates.map((w) => w.id));
+      page.children = page.children.filter((w) => {
+        if (excessIds.has(w.id)) return false;
+        const title = (w.title || '').toLowerCase();
+        const id = (w.id || '').toLowerCase();
+        if ((title.includes('工作') && title.includes('标题')) || id.includes('work-sec-title') || id.includes('work-title')) return false;
+        return true;
+      });
+    } else {
+      workCandidates.forEach((widget, idx) => {
+        if (idx < workList.length) {
+          const w = workList[idx];
+          const formattedBullets = w.bullets.map((b) => (b.trim().startsWith('•') || b.trim().startsWith('1.') || b.trim().startsWith('2.')) ? b : `• ${b}`).join('\n');
+          const cardWidth = widget.css.width || 740;
+          const fontSz = widget.css.fontSize || 12.5;
+          const cardH = calculateCardHeight(w.company, w.role, w.period, w.bullets, cardWidth, fontSz, 20);
+
+          widget.css.height = Math.max(65, cardH);
+          widget.dataSource.companyName = w.company;
+          widget.dataSource.jobTitle = w.role;
+          widget.dataSource.workTime = w.period;
+          widget.dataSource.workContent = formattedBullets;
+          widget.dataSource.text = `${w.company} · ${w.role}\n${formattedBullets}`;
+          markUsed(widget);
+        }
+      });
+
+      if (workCandidates.length > workList.length) {
+        const excessIds = new Set(workCandidates.slice(workList.length).map((w) => w.id));
+        page.children = page.children.filter((w) => !excessIds.has(w.id));
+      } else if (workList.length > workCandidates.length && workCandidates.length > 0) {
+        const templateWidget = workCandidates[workCandidates.length - 1];
+        const insertIdx = page.children.indexOf(templateWidget);
+
+        let lastTop = Number(templateWidget.css.top) || 0;
+        let lastHeight = Number(templateWidget.css.height) || 100;
+
+        for (let idx = workCandidates.length; idx < workList.length; idx++) {
+          const w = workList[idx];
+          const formattedBullets = w.bullets.map((b) => (b.trim().startsWith('•') || b.trim().startsWith('1.') || b.trim().startsWith('2.')) ? b : `• ${b}`).join('\n');
+          const cardWidth = templateWidget.css.width || 740;
+          const fontSz = templateWidget.css.fontSize || 12.5;
+          const cardH = calculateCardHeight(w.company, w.role, w.period, w.bullets, cardWidth, fontSz, 20);
+
+          const extraWidget: IWidget = JSON.parse(JSON.stringify(templateWidget));
+          extraWidget.id = `widget-work-extra-${idx}-${Date.now()}`;
+          extraWidget.title = `工作 ${idx + 1}`;
+          extraWidget.css.top = lastTop + lastHeight + 12;
+          extraWidget.css.height = Math.max(65, cardH);
+          extraWidget.dataSource.companyName = w.company;
+          extraWidget.dataSource.jobTitle = w.role;
+          extraWidget.dataSource.workTime = w.period;
+          extraWidget.dataSource.workContent = formattedBullets;
+          extraWidget.dataSource.text = `${w.company} · ${w.role}\n${formattedBullets}`;
+
+          page.children.splice(insertIdx + 1 + (idx - workCandidates.length), 0, extraWidget);
+          markUsed(extraWidget);
+
+          lastTop = extraWidget.css.top;
+          lastHeight = extraWidget.css.height;
+        }
+      }
     }
   }
 
   // 8. Project Experience Widgets
-  const projectCandidates = page.children.filter(isUnused).filter((widget) => {
-    const title = (widget.title || '').toLowerCase();
-    const id = (widget.id || '').toLowerCase();
-    const compName = (widget.componentName || '').toLowerCase();
+  const isGridProj = page.children.some(
+    (w) => w.id.startsWith('widget-grid-proj-') || w.binding === 'project-bg' || w.binding === 'project-header'
+  );
+  const isTimelineProj = page.children.some(
+    (w) => w.id.includes('tl-dot-proj') || w.id.includes('proj-tl-') || w.binding === 'project-dot'
+  );
 
-    return (
-      !title.includes('标题') &&
-      !title.includes('线') &&
-      !id.includes('line') &&
-      !id.includes('title') &&
-      (compName.includes('exper') || id.includes('project') || title.includes('项目卡片') || title.includes('项目 1') || title.includes('项目 2'))
-    );
-  });
+  if (isGridProj) {
+    if (projectList.length === 0) {
+      page.children = page.children.filter(
+        (w) => !(w.id.startsWith('widget-grid-proj-') || w.binding?.startsWith('project-'))
+      );
+    } else {
+      interface GridProjGroup {
+        bg?: IWidget;
+        header?: IWidget;
+        content?: IWidget;
+      }
+      const groups: GridProjGroup[] = [];
+      for (let i = 0; i < 50; i++) {
+        const bg = page.children.find((w) => w.id === `widget-grid-proj-bg-${i}` || (w.binding === 'project-bg' && w.customProps?.groupIndex === i));
+        const header = page.children.find((w) => w.id === `widget-grid-proj-header-${i}` || (w.binding === 'project-header' && w.customProps?.groupIndex === i));
+        const content = page.children.find((w) => w.id === `widget-grid-proj-content-${i}` || (w.binding === 'project-content' && w.customProps?.groupIndex === i));
+        if (!bg && !header && !content) break;
+        groups.push({ bg, header, content });
+      }
 
-  projectCandidates.forEach((widget, idx) => {
-    if (idx < projectList.length) {
-      const p = projectList[idx];
-      const formattedBullets = p.bullets.map((b) => (b.trim().startsWith('•') || b.trim().startsWith('1.') || b.trim().startsWith('2.')) ? b : `• ${b}`).join('\n');
-      const cardWidth = widget.css.width || 740;
-      const fontSz = widget.css.fontSize || 12.5;
-      const cardH = calculateCardHeight(p.name, p.role, p.period, p.bullets, cardWidth, fontSz, 20);
+      for (let idx = 0; idx < projectList.length; idx++) {
+        const p = projectList[idx];
+        const formattedBullets = p.bullets.map((b) => (b.trim().startsWith('•') || b.trim().startsWith('1.') || b.trim().startsWith('2.')) ? b : `• ${b}`).join('\n');
+        const cardH = calculateCardHeight(p.name, p.role, p.period, p.bullets, 770, 12.5, 20);
 
-      widget.css.height = Math.max(65, cardH);
-      widget.dataSource.companyName = p.name;
-      widget.dataSource.jobTitle = p.role;
-      widget.dataSource.workTime = p.period;
-      widget.dataSource.workContent = formattedBullets;
-      widget.dataSource.text = `${p.name} · ${p.role}\n${formattedBullets}`;
-      markUsed(widget);
+        if (idx < groups.length) {
+          const grp = groups[idx];
+          if (grp.header) {
+            grp.header.dataSource.text = `${p.name}  ·  ${p.role}  (${p.period})`;
+            markUsed(grp.header);
+          }
+          if (grp.content) {
+            grp.content.css.height = Math.max(30, cardH - 52);
+            grp.content.dataSource = {
+              companyName: p.name,
+              jobTitle: p.role,
+              workTime: p.period,
+              workContent: formattedBullets,
+              text: formattedBullets
+            };
+            markUsed(grp.content);
+          }
+          if (grp.bg) {
+            grp.bg.css.height = cardH;
+            markUsed(grp.bg);
+          }
+        } else if (groups.length > 0) {
+          const prevGrp = groups[idx - 1] || groups[groups.length - 1];
+          const prevBottom = Math.max(
+            (Number(prevGrp.bg?.css.top) || 0) + (Number(prevGrp.bg?.css.height) || 0),
+            (Number(prevGrp.content?.css.top) || 0) + (Number(prevGrp.content?.css.height) || 0)
+          );
+          const newTop = prevBottom + 12;
+
+          let newBg: IWidget | undefined;
+          let newHeader: IWidget | undefined;
+          let newContent: IWidget | undefined;
+
+          if (prevGrp.bg) {
+            newBg = JSON.parse(JSON.stringify(prevGrp.bg));
+            newBg!.id = `widget-grid-proj-bg-${idx}`;
+            newBg!.title = `项目卡片背景 ${idx + 1}`;
+            newBg!.css.top = newTop;
+            newBg!.css.height = cardH;
+            newBg!.binding = 'project-bg';
+            markUsed(newBg!);
+          }
+          if (prevGrp.header) {
+            newHeader = JSON.parse(JSON.stringify(prevGrp.header));
+            newHeader!.id = `widget-grid-proj-header-${idx}`;
+            newHeader!.title = `项目信息头部 ${idx + 1}`;
+            newHeader!.css.top = newTop + 12;
+            newHeader!.binding = 'project-header';
+            newHeader!.dataSource = { text: `${p.name}  ·  ${p.role}  (${p.period})` };
+            markUsed(newHeader!);
+          }
+          if (prevGrp.content) {
+            newContent = JSON.parse(JSON.stringify(prevGrp.content));
+            newContent!.id = `widget-grid-proj-content-${idx}`;
+            newContent!.title = `项目要点内容 ${idx + 1}`;
+            newContent!.css.top = newTop + 40;
+            newContent!.css.height = Math.max(30, cardH - 52);
+            newContent!.binding = 'project-content';
+            newContent!.dataSource = {
+              companyName: p.name,
+              jobTitle: p.role,
+              workTime: p.period,
+              workContent: formattedBullets,
+              text: formattedBullets
+            };
+            markUsed(newContent!);
+          }
+
+          const lastWidget = prevGrp.content || prevGrp.header || prevGrp.bg;
+          const insertIdx = lastWidget ? page.children.indexOf(lastWidget) + 1 : page.children.length;
+          const toAdd = [newBg, newHeader, newContent].filter(Boolean) as IWidget[];
+          page.children.splice(insertIdx, 0, ...toAdd);
+          groups.push({ bg: newBg, header: newHeader, content: newContent });
+        }
+      }
+
+      if (groups.length > projectList.length) {
+        const excessIds = new Set<string>();
+        for (let i = projectList.length; i < groups.length; i++) {
+          if (groups[i].bg) excessIds.add(groups[i].bg!.id);
+          if (groups[i].header) excessIds.add(groups[i].header!.id);
+          if (groups[i].content) excessIds.add(groups[i].content!.id);
+        }
+        page.children = page.children.filter((w) => !excessIds.has(w.id));
+      }
     }
-  });
+  } else if (isTimelineProj) {
+    if (projectList.length === 0) {
+      page.children = page.children.filter(
+        (w) => !(w.id.includes('tl-dot-proj') || w.id.includes('proj-tl-') || w.id.includes('timeline-line-proj') || w.binding?.startsWith('project-'))
+      );
+    } else {
+      interface TimelineProjGroup {
+        dot?: IWidget;
+        card?: IWidget;
+      }
+      const groups: TimelineProjGroup[] = [];
+      for (let i = 0; i < 50; i++) {
+        const dot = page.children.find((w) => w.id === `widget-tl-dot-proj-${i}` || (w.binding === 'project-dot' && w.customProps?.groupIndex === i));
+        const card = page.children.find((w) => w.id === `widget-proj-tl-${i}` || (w.binding === 'project-card' && w.customProps?.groupIndex === i));
+        if (!dot && !card) break;
+        groups.push({ dot, card });
+      }
 
-  // Remove excess project candidate widgets if incoming has fewer
-  if (projectCandidates.length > projectList.length) {
-    const excessIds = new Set(projectCandidates.slice(projectList.length).map((w) => w.id));
-    page.children = page.children.filter((w) => !excessIds.has(w.id));
-  } else if (projectList.length > projectCandidates.length && projectCandidates.length > 0) {
-    const templateWidget = projectCandidates[projectCandidates.length - 1];
-    const insertIdx = page.children.indexOf(templateWidget);
+      let lastCardBottom = 0;
+      for (let idx = 0; idx < projectList.length; idx++) {
+        const p = projectList[idx];
+        const formattedBullets = p.bullets.map((b) => (b.trim().startsWith('•') || b.trim().startsWith('1.') || b.trim().startsWith('2.')) ? b : `• ${b}`).join('\n');
+        const cardH = calculateCardHeight(p.name, p.role, p.period, p.bullets, 722, 12.5, 20);
 
-    let lastTop = Number(templateWidget.css.top) || 0;
-    let lastHeight = Number(templateWidget.css.height) || 100;
+        if (idx < groups.length) {
+          const grp = groups[idx];
+          if (grp.card) {
+            grp.card.css.height = cardH;
+            grp.card.dataSource = {
+              companyName: p.name,
+              jobTitle: p.role,
+              workTime: p.period,
+              workContent: formattedBullets,
+              text: `${p.name} · ${p.role}\n${formattedBullets}`
+            };
+            markUsed(grp.card);
+            lastCardBottom = (Number(grp.card.css.top) || 0) + cardH;
+          }
+          if (grp.dot) markUsed(grp.dot);
+        } else if (groups.length > 0) {
+          const prevGrp = groups[idx - 1] || groups[groups.length - 1];
+          const prevTop = Number(prevGrp.card?.css.top) || 0;
+          const prevHeight = Number(prevGrp.card?.css.height) || 80;
+          const newTop = prevTop + prevHeight + 10;
 
-    for (let idx = projectCandidates.length; idx < projectList.length; idx++) {
-      const p = projectList[idx];
-      const formattedBullets = p.bullets.map((b) => (b.trim().startsWith('•') || b.trim().startsWith('1.') || b.trim().startsWith('2.')) ? b : `• ${b}`).join('\n');
-      const cardWidth = templateWidget.css.width || 740;
-      const fontSz = templateWidget.css.fontSize || 12.5;
-      const cardH = calculateCardHeight(p.name, p.role, p.period, p.bullets, cardWidth, fontSz, 20);
+          let newDot: IWidget | undefined;
+          let newCard: IWidget | undefined;
 
-      const extraWidget: IWidget = JSON.parse(JSON.stringify(templateWidget));
-      extraWidget.id = `widget-project-extra-${idx}-${Date.now()}`;
-      extraWidget.title = `项目 ${idx + 1}`;
-      extraWidget.css.top = lastTop + lastHeight + 12;
-      extraWidget.css.height = Math.max(65, cardH);
-      extraWidget.dataSource.companyName = p.name;
-      extraWidget.dataSource.jobTitle = p.role;
-      extraWidget.dataSource.workTime = p.period;
-      extraWidget.dataSource.workContent = formattedBullets;
-      extraWidget.dataSource.text = `${p.name} · ${p.role}\n${formattedBullets}`;
+          if (prevGrp.dot) {
+            newDot = JSON.parse(JSON.stringify(prevGrp.dot));
+            newDot!.id = `widget-tl-dot-proj-${idx}`;
+            newDot!.css.top = newTop + 6;
+            newDot!.binding = 'project-dot';
+            markUsed(newDot!);
+          }
+          if (prevGrp.card) {
+            newCard = JSON.parse(JSON.stringify(prevGrp.card));
+            newCard!.id = `widget-proj-tl-${idx}`;
+            newCard!.title = `项目 ${idx + 1}`;
+            newCard!.css.top = newTop;
+            newCard!.css.height = cardH;
+            newCard!.binding = 'project-card';
+            newCard!.dataSource = {
+              companyName: p.name,
+              jobTitle: p.role,
+              workTime: p.period,
+              workContent: formattedBullets,
+              text: `${p.name} · ${p.role}\n${formattedBullets}`
+            };
+            markUsed(newCard!);
+            lastCardBottom = newTop + cardH;
+          }
 
-      page.children.splice(insertIdx + 1 + (idx - projectCandidates.length), 0, extraWidget);
-      markUsed(extraWidget);
+          const lastWidget = prevGrp.card || prevGrp.dot;
+          const insertIdx = lastWidget ? page.children.indexOf(lastWidget) + 1 : page.children.length;
+          const toAdd = [newDot, newCard].filter(Boolean) as IWidget[];
+          page.children.splice(insertIdx, 0, ...toAdd);
+          groups.push({ dot: newDot, card: newCard });
+        }
+      }
 
-      lastTop = extraWidget.css.top;
-      lastHeight = extraWidget.css.height;
+      if (groups.length > projectList.length) {
+        const excessIds = new Set<string>();
+        for (let i = projectList.length; i < groups.length; i++) {
+          if (groups[i].dot) excessIds.add(groups[i].dot!.id);
+          if (groups[i].card) excessIds.add(groups[i].card!.id);
+        }
+        page.children = page.children.filter((w) => !excessIds.has(w.id));
+      }
+
+      const projLine = page.children.find((w) => w.id === 'widget-timeline-line-proj');
+      if (projLine && lastCardBottom > 0) {
+        const lineTop = Number(projLine.css.top) || 0;
+        projLine.css.height = Math.max(40, lastCardBottom - lineTop - 10);
+      }
+    }
+  } else {
+    const projectCandidates = page.children.filter(isUnused).filter((widget) => {
+      if (isDecorativeOrBackgroundWidget(widget)) return false;
+      const title = (widget.title || '').toLowerCase();
+      const id = (widget.id || '').toLowerCase();
+      const compName = (widget.componentName || '').toLowerCase();
+
+      return (
+        !title.includes('标题') &&
+        !title.includes('线') &&
+        !id.includes('line') &&
+        !id.includes('title') &&
+        (compName.includes('exper') || id.includes('project') || title.includes('项目卡片') || title.includes('项目 1') || title.includes('项目 2'))
+      );
+    });
+
+    if (projectList.length === 0) {
+      const excessIds = new Set(projectCandidates.map((w) => w.id));
+      page.children = page.children.filter((w) => {
+        if (excessIds.has(w.id)) return false;
+        const title = (w.title || '').toLowerCase();
+        const id = (w.id || '').toLowerCase();
+        if ((title.includes('项目') && title.includes('标题')) || id.includes('project-title') || id.includes('proj-sec-title') || id.includes('proj-title')) return false;
+        return true;
+      });
+    } else {
+      projectCandidates.forEach((widget, idx) => {
+        if (idx < projectList.length) {
+          const p = projectList[idx];
+          const formattedBullets = p.bullets.map((b) => (b.trim().startsWith('•') || b.trim().startsWith('1.') || b.trim().startsWith('2.')) ? b : `• ${b}`).join('\n');
+          const cardWidth = widget.css.width || 740;
+          const fontSz = widget.css.fontSize || 12.5;
+          const cardH = calculateCardHeight(p.name, p.role, p.period, p.bullets, cardWidth, fontSz, 20);
+
+          widget.css.height = Math.max(65, cardH);
+          widget.dataSource.companyName = p.name;
+          widget.dataSource.jobTitle = p.role;
+          widget.dataSource.workTime = p.period;
+          widget.dataSource.workContent = formattedBullets;
+          widget.dataSource.text = `${p.name} · ${p.role}\n${formattedBullets}`;
+          markUsed(widget);
+        }
+      });
+
+      if (projectCandidates.length > projectList.length) {
+        const excessIds = new Set(projectCandidates.slice(projectList.length).map((w) => w.id));
+        page.children = page.children.filter((w) => !excessIds.has(w.id));
+      } else if (projectList.length > projectCandidates.length && projectCandidates.length > 0) {
+        const templateWidget = projectCandidates[projectCandidates.length - 1];
+        const insertIdx = page.children.indexOf(templateWidget);
+
+        let lastTop = Number(templateWidget.css.top) || 0;
+        let lastHeight = Number(templateWidget.css.height) || 100;
+
+        for (let idx = projectCandidates.length; idx < projectList.length; idx++) {
+          const p = projectList[idx];
+          const formattedBullets = p.bullets.map((b) => (b.trim().startsWith('•') || b.trim().startsWith('1.') || b.trim().startsWith('2.')) ? b : `• ${b}`).join('\n');
+          const cardWidth = templateWidget.css.width || 740;
+          const fontSz = templateWidget.css.fontSize || 12.5;
+          const cardH = calculateCardHeight(p.name, p.role, p.period, p.bullets, cardWidth, fontSz, 20);
+
+          const extraWidget: IWidget = JSON.parse(JSON.stringify(templateWidget));
+          extraWidget.id = `widget-project-extra-${idx}-${Date.now()}`;
+          extraWidget.title = `项目 ${idx + 1}`;
+          extraWidget.css.top = lastTop + lastHeight + 12;
+          extraWidget.css.height = Math.max(65, cardH);
+          extraWidget.dataSource.companyName = p.name;
+          extraWidget.dataSource.jobTitle = p.role;
+          extraWidget.dataSource.workTime = p.period;
+          extraWidget.dataSource.workContent = formattedBullets;
+          extraWidget.dataSource.text = `${p.name} · ${p.role}\n${formattedBullets}`;
+
+          page.children.splice(insertIdx + 1 + (idx - projectCandidates.length), 0, extraWidget);
+          markUsed(extraWidget);
+
+          lastTop = extraWidget.css.top;
+          lastHeight = extraWidget.css.height;
+        }
+      }
     }
   }
 
@@ -1130,6 +1751,51 @@ export function fillAiDataIntoExistingSchema(
 
   if (isTwoColumn) {
     // Two-column layout (modern-sidebar): Left column < 275, Right column >= 275
+    // Align and sequence left sidebar widgets so contact frame & summary frame adapt to new text
+    const leftWidgets = page.children.filter((w) => (Number(w.css.left) || 0) < 270);
+    const avatarW = leftWidgets.find((w) => (w.componentName || '').startsWith('hj-avatar') || (w.id || '').includes('avatar'));
+    const nameW = leftWidgets.find((w) => (w.id || '').includes('name') || (w.title || '').includes('姓名'));
+    const intentW = leftWidgets.find((w) => (w.id || '').includes('intent') || (w.title || '').includes('意向'));
+    const contactBg = leftWidgets.find((w) => (w.id || '').includes('contact-bg') || ((w.title || '').includes('基本信息') && w.componentName === 'hj-rectangle'));
+    const contactText = leftWidgets.find((w) => (w.id || '').includes('contact-sidebar-text') || ((w.title || '').includes('基本信息') && w.componentName !== 'hj-rectangle'));
+    const summaryBg = leftWidgets.find((w) => (w.id || '').includes('summary-sidebar-bg') || ((w.title || '').includes('自我评价') && w.componentName === 'hj-rectangle'));
+    const summaryText = leftWidgets.find((w) => (w.id || '').includes('summary-sidebar-text') || ((w.title || '').includes('自我评价') && w.componentName !== 'hj-rectangle'));
+
+    let curLeftY = avatarW ? (Number(avatarW.css.top) || 40) + (Number(avatarW.css.height) || 85) + 15 : 45;
+    if (nameW) {
+      nameW.css.top = curLeftY;
+      curLeftY += (Number(nameW.css.height) || 38) + 2;
+    }
+    if (intentW) {
+      intentW.css.top = curLeftY;
+      curLeftY += (Number(intentW.css.height) || 30) + 8;
+    }
+    if (contactText) {
+      const contactRows = (contactText.dataSource?.text || '').split('\n').filter(Boolean).length || 4;
+      const cTextH = Math.max(80, contactRows * 20 + 16);
+      contactText.css.top = curLeftY + 10;
+      contactText.css.height = cTextH;
+      if (contactBg) {
+        contactBg.css.top = curLeftY;
+        contactBg.css.height = cTextH + 20;
+        curLeftY += cTextH + 20 + 14;
+      } else {
+        curLeftY += cTextH + 14;
+      }
+    }
+    if (summaryText) {
+      const sH = Math.min(280, Number(summaryText.css.height) || 120);
+      summaryText.css.top = curLeftY + 10;
+      summaryText.css.height = sH;
+      if (summaryBg) {
+        summaryBg.css.top = curLeftY;
+        summaryBg.css.height = sH + 20;
+        curLeftY += sH + 20 + 14;
+      } else {
+        curLeftY += sH + 14;
+      }
+    }
+
     const rightWidgets = page.children.filter((w) => (Number(w.css.left) || 0) >= 270);
     const sidebarBg = page.children.find(
       (w) => (w.id || '').includes('sidebar-bg') || (w.title || '').includes('侧边栏')
@@ -1140,13 +1806,19 @@ export function fillAiDataIntoExistingSchema(
       (w) => (w.title || '').includes('工作') && (w.title || '').includes('标题')
     );
     const workCards = rightWidgets.filter((w) =>
-      workCandidates.some((c) => c.id === w.id)
+      !isDecorativeOrBackgroundWidget(w) &&
+      !(w.title || '').includes('标题') &&
+      !(w.id || '').includes('title') &&
+      (w.binding?.startsWith('work-') || w.id.includes('work') || (w.title || '').includes('工作') || (w.title || '').includes('经历卡片'))
     );
     const projTitle = rightWidgets.find(
       (w) => (w.title || '').includes('项目') && (w.title || '').includes('标题')
     );
     const projCards = rightWidgets.filter((w) =>
-      projectCandidates.some((c) => c.id === w.id)
+      !isDecorativeOrBackgroundWidget(w) &&
+      !(w.title || '').includes('标题') &&
+      !(w.id || '').includes('title') &&
+      (w.binding?.startsWith('project-') || w.id.includes('proj') || (w.title || '').includes('项目'))
     );
     const skillsTitle = rightWidgets.find(
       (w) => (w.title || '').includes('技能') && (w.title || '').includes('标题')
@@ -1215,8 +1887,8 @@ export function fillAiDataIntoExistingSchema(
       curRightY += eduH + 14;
     }
 
-    const totalPages = Math.max(1, Math.ceil(curRightY / A4_PAGE_HEIGHT));
-    finalCanvasBottom = totalPages * A4_PAGE_HEIGHT;
+    const totalPages = Math.max(1, Math.ceil(curRightY / calculateA4PageHeight(820)));
+    finalCanvasBottom = totalPages * calculateA4PageHeight(820);
     if (sidebarBg) {
       sidebarBg.css.top = 20;
       sidebarBg.css.height = finalCanvasBottom - 40;
@@ -1344,7 +2016,11 @@ export function fillAiDataIntoExistingSchema(
         }
       } else if (type === 'work' && workSectionWidgets.length > 0) {
         const titleW = workSectionWidgets.find((w) => (w.title || '').includes('标题') || (w.id || '').includes('title'));
-        const cards = workSectionWidgets.filter((w) => workCandidates.some((c) => c.id === w.id));
+        const cards = workSectionWidgets.filter((w) =>
+          !isDecorativeOrBackgroundWidget(w) &&
+          !(w.title || '').includes('标题') &&
+          !(w.id || '').includes('title')
+        );
         const lineW = workSectionWidgets.find((w) => (w.id || '').includes('line-work'));
         const dots = workSectionWidgets.filter((w) => (w.id || '').includes('dot-work'));
 
@@ -1370,7 +2046,11 @@ export function fillAiDataIntoExistingSchema(
         flowY += 8;
       } else if (type === 'project' && projectSectionWidgets.length > 0) {
         const titleW = projectSectionWidgets.find((w) => (w.title || '').includes('标题') || (w.id || '').includes('title'));
-        const cards = projectSectionWidgets.filter((w) => projectCandidates.some((c) => c.id === w.id));
+        const cards = projectSectionWidgets.filter((w) =>
+          !isDecorativeOrBackgroundWidget(w) &&
+          !(w.title || '').includes('标题') &&
+          !(w.id || '').includes('title')
+        );
         const lineW = projectSectionWidgets.find((w) => (w.id || '').includes('line-proj'));
         const dots = projectSectionWidgets.filter((w) => (w.id || '').includes('dot-proj'));
 
@@ -1411,8 +2091,8 @@ export function fillAiDataIntoExistingSchema(
       }
     });
 
-    const totalPages = Math.max(1, Math.ceil(flowY / A4_PAGE_HEIGHT));
-    finalCanvasBottom = totalPages * A4_PAGE_HEIGHT;
+    const totalPages = Math.max(1, Math.ceil(flowY / calculateA4PageHeight(820)));
+    finalCanvasBottom = totalPages * calculateA4PageHeight(820);
   }
 
   newSchema.css.height = finalCanvasBottom;
@@ -1559,6 +2239,14 @@ export function buildLegoSchemaFromResume(
       dataSource: { text: `🎯 意向：${jobIntent}` }
     });
 
+    // ── Left sidebar: curSideY accumulator layout ──────────────────────────
+    const contactLineH = Math.ceil(12 * 1.6);
+    const contactRows = [edu.school, phone, email, location].filter(Boolean).length || 4;
+    const contactTextH = Math.max(80, contactRows * contactLineH + 16);
+    const contactFrameH = contactTextH + 20;
+
+    let curSideY = nameTop + 78;
+
     // Contact Card
     children.push({
       id: 'widget-contact-bg-sidebar',
@@ -1566,9 +2254,9 @@ export function buildLegoSchemaFromResume(
       title: '基本信息框',
       css: {
         left: 30,
-        top: nameTop + 78,
+        top: curSideY,
         width: 230,
-        height: 145,
+        height: contactFrameH,
         zIndex: 2,
         backgroundColor: '#ffffff',
         borderColor: '#cbd5e1',
@@ -1586,9 +2274,9 @@ export function buildLegoSchemaFromResume(
       title: '基本信息列表',
       css: {
         left: 42,
-        top: nameTop + 88,
+        top: curSideY + 10,
         width: 206,
-        height: 125,
+        height: contactTextH,
         zIndex: 3,
         fontColor: '#334155',
         fontSize: 12,
@@ -1599,7 +2287,10 @@ export function buildLegoSchemaFromResume(
       }
     });
 
-    const summaryH = Math.min(260, calculateSummaryHeight(summary, 206, 11.5, 18));
+    curSideY += contactFrameH + 14;
+
+    const summaryH = Math.min(280, calculateSummaryHeight(summary, 206, 11.5, 18));
+    const summaryFrameH = summaryH + 20;
 
     // Summary Card
     children.push({
@@ -1608,9 +2299,9 @@ export function buildLegoSchemaFromResume(
       title: '自我评价框',
       css: {
         left: 30,
-        top: nameTop + 235,
+        top: curSideY,
         width: 230,
-        height: summaryH + 20,
+        height: summaryFrameH,
         zIndex: 2,
         backgroundColor: '#ffffff',
         borderColor: '#cbd5e1',
@@ -1628,7 +2319,7 @@ export function buildLegoSchemaFromResume(
       title: '自我评价内容',
       css: {
         left: 42,
-        top: nameTop + 245,
+        top: curSideY + 10,
         width: 206,
         height: summaryH,
         zIndex: 3,
@@ -1638,6 +2329,9 @@ export function buildLegoSchemaFromResume(
       },
       dataSource: { text: `【自我评价】\n${summary}` }
     });
+
+    curSideY += summaryFrameH + 14;
+    void curSideY;
 
     // ---------------- Right Main Column ----------------
     let rightTop = 30;
@@ -1829,8 +2523,8 @@ export function buildLegoSchemaFromResume(
 
     rightTop += 84;
 
-    const totalPages = Math.max(1, Math.ceil(rightTop / A4_PAGE_HEIGHT));
-    currentTop = totalPages * A4_PAGE_HEIGHT;
+    const totalPages = Math.max(1, Math.ceil(rightTop / calculateA4PageHeight(820)));
+    currentTop = totalPages * calculateA4PageHeight(820);
 
     const sidebarBg = children.find((c) => c.id === 'widget-sidebar-bg');
     if (sidebarBg) {
@@ -2108,8 +2802,8 @@ export function buildLegoSchemaFromResume(
     });
     topPos += 45;
 
-    const totalPages = Math.max(1, Math.ceil(topPos / A4_PAGE_HEIGHT));
-    const finalHeight = totalPages * A4_PAGE_HEIGHT;
+    const totalPages = Math.max(1, Math.ceil(topPos / calculateA4PageHeight(820)));
+    const finalHeight = totalPages * calculateA4PageHeight(820);
 
     const schemaResult: IHJSchema = {
       id: `lego-resume-corporate-${Date.now()}`,
@@ -2443,8 +3137,8 @@ export function buildLegoSchemaFromResume(
     });
     topPos += 45;
 
-    const totalPages = Math.max(1, Math.ceil(topPos / A4_PAGE_HEIGHT));
-    const finalHeight = totalPages * A4_PAGE_HEIGHT;
+    const totalPages = Math.max(1, Math.ceil(topPos / calculateA4PageHeight(820)));
+    const finalHeight = totalPages * calculateA4PageHeight(820);
 
     const schemaResult: IHJSchema = {
       id: `lego-resume-timeline-${Date.now()}`,
@@ -2692,103 +3386,110 @@ export function buildLegoSchemaFromResume(
     cardTop += skillsCardHeight + 18;
 
     // Work Experience
-    const firstWorkH = workList.length > 0 ? calculateCardHeight(workList[0].company, workList[0].role, workList[0].period, workList[0].bullets, 770, 12.5, 20) : 100;
-    cardTop = getSafeSectionTitleTop(cardTop, 26, firstWorkH + 10);
-    children.push({
-      id: 'widget-grid-work-sec-title',
-      componentName: 'hj-text-1',
-      title: '工作经历板块标题',
-      css: {
-        left: 25,
-        top: cardTop,
-        width: 770,
-        height: 26,
-        zIndex: 2,
-        fontColor: themeColor,
-        fontSize: 16,
-        fontWeight: 'bold'
-      },
-      dataSource: { text: '💼 工作经历' }
-    });
-    cardTop += 32;
-
-    workList.forEach((w, wIdx) => {
-      const formattedBullets = w.bullets.map((b) => `• ${b}`).join('\n');
-      const cardH = calculateCardHeight(w.company, w.role, w.period, w.bullets, 770, 12.5, 20);
-      cardTop = getSafePageBreakTop(cardTop, cardH);
-
+    if (workList.length > 0) {
+      const firstWorkH = calculateCardHeight(workList[0].company, workList[0].role, workList[0].period, workList[0].bullets, 770, 12.5, 20);
+      cardTop = getSafeSectionTitleTop(cardTop, 26, firstWorkH + 10);
       children.push({
-        id: `widget-grid-work-bg-${wIdx}`,
-        componentName: 'hj-rectangle',
-        title: `工作卡片背景 ${wIdx + 1}`,
+        id: 'widget-grid-work-sec-title',
+        componentName: 'hj-text-1',
+        title: '工作经历板块标题',
+        binding: 'work-sec-title',
         css: {
           left: 25,
           top: cardTop,
           width: 770,
-          height: cardH,
-          zIndex: 1,
-          backgroundColor: '#ffffff',
-          borderColor: '#e2e8f0',
-          borderStyle: 'solid',
-          borderWidth: 1,
-          borderRadius: 8
-        },
-        dataSource: {}
-      });
-
-      children.push({
-        id: `widget-grid-work-header-${wIdx}`,
-        componentName: 'hj-text-1',
-        title: `工作信息头部 ${wIdx + 1}`,
-        css: {
-          left: 45,
-          top: cardTop + 12,
-          width: 730,
-          height: 24,
+          height: 26,
           zIndex: 2,
-          fontColor: '#0f172a',
-          fontSize: 14,
+          fontColor: themeColor,
+          fontSize: 16,
           fontWeight: 'bold'
         },
-        dataSource: { text: `${w.company}  ·  ${w.role}  (${w.period})` }
+        dataSource: { text: '💼 工作经历' }
+      });
+      cardTop += 32;
+
+      workList.forEach((w, wIdx) => {
+        const formattedBullets = w.bullets.map((b) => `• ${b}`).join('\n');
+        const cardH = calculateCardHeight(w.company, w.role, w.period, w.bullets, 770, 12.5, 20);
+        cardTop = getSafePageBreakTop(cardTop, cardH);
+
+        children.push({
+          id: `widget-grid-work-bg-${wIdx}`,
+          componentName: 'hj-rectangle',
+          title: `工作卡片背景 ${wIdx + 1}`,
+          binding: 'work-bg',
+          css: {
+            left: 25,
+            top: cardTop,
+            width: 770,
+            height: cardH,
+            zIndex: 1,
+            backgroundColor: '#ffffff',
+            borderColor: '#e2e8f0',
+            borderStyle: 'solid',
+            borderWidth: 1,
+            borderRadius: 8
+          },
+          dataSource: {}
+        });
+
+        children.push({
+          id: `widget-grid-work-header-${wIdx}`,
+          componentName: 'hj-text-1',
+          title: `工作信息头部 ${wIdx + 1}`,
+          binding: 'work-header',
+          css: {
+            left: 45,
+            top: cardTop + 12,
+            width: 730,
+            height: 24,
+            zIndex: 2,
+            fontColor: '#0f172a',
+            fontSize: 14,
+            fontWeight: 'bold'
+          },
+          dataSource: { text: `${w.company}  ·  ${w.role}  (${w.period})` }
+        });
+
+        children.push({
+          id: `widget-grid-work-content-${wIdx}`,
+          componentName: 'hj-text-1',
+          title: `工作要点内容 ${wIdx + 1}`,
+          binding: 'work-content',
+          css: {
+            left: 45,
+            top: cardTop + 40,
+            width: 730,
+            height: Math.max(30, cardH - 52),
+            zIndex: 2,
+            fontColor: '#334155',
+            fontSize: 12.5,
+            lineHeight: 1.6
+          },
+          dataSource: {
+            companyName: w.company,
+            jobTitle: w.role,
+            workTime: w.period,
+            workContent: formattedBullets,
+            text: formattedBullets
+          }
+        });
+
+        cardTop += cardH + 12;
       });
 
-      children.push({
-        id: `widget-grid-work-content-${wIdx}`,
-        componentName: 'hj-text-1',
-        title: `工作要点内容 ${wIdx + 1}`,
-        css: {
-          left: 45,
-          top: cardTop + 40,
-          width: 730,
-          height: Math.max(30, cardH - 52),
-          zIndex: 2,
-          fontColor: '#334155',
-          fontSize: 12.5,
-          lineHeight: 1.6
-        },
-        dataSource: {
-          companyName: w.company,
-          jobTitle: w.role,
-          workTime: w.period,
-          workContent: formattedBullets,
-          text: formattedBullets
-        }
-      });
-
-      cardTop += cardH + 12;
-    });
-
-    cardTop += 6;
+      cardTop += 6;
+    }
 
     // Project Experience
     if (projectList.length > 0) {
-      const firstProjH = projectList.length > 0 ? calculateCardHeight(projectList[0].name, projectList[0].role, projectList[0].period, projectList[0].bullets, 770, 12.5, 20) : 100;
+      const firstProjH = calculateCardHeight(projectList[0].name, projectList[0].role, projectList[0].period, projectList[0].bullets, 770, 12.5, 20);
       cardTop = getSafeSectionTitleTop(cardTop, 26, firstProjH + 10);
       children.push({
         id: 'widget-grid-proj-sec-title',
         componentName: 'hj-text-1',
         title: '项目经历板块标题',
+        binding: 'project-sec-title',
         css: {
           left: 25,
           top: cardTop,
@@ -2812,6 +3513,7 @@ export function buildLegoSchemaFromResume(
           id: `widget-grid-proj-bg-${pIdx}`,
           componentName: 'hj-rectangle',
           title: `项目卡片背景 ${pIdx + 1}`,
+          binding: 'project-bg',
           css: {
             left: 25,
             top: cardTop,
@@ -2831,6 +3533,7 @@ export function buildLegoSchemaFromResume(
           id: `widget-grid-proj-header-${pIdx}`,
           componentName: 'hj-text-1',
           title: `项目信息头部 ${pIdx + 1}`,
+          binding: 'project-header',
           css: {
             left: 45,
             top: cardTop + 12,
@@ -2848,6 +3551,7 @@ export function buildLegoSchemaFromResume(
           id: `widget-grid-proj-content-${pIdx}`,
           componentName: 'hj-text-1',
           title: `项目要点内容 ${pIdx + 1}`,
+          binding: 'project-content',
           css: {
             left: 45,
             top: cardTop + 40,
@@ -2929,8 +3633,8 @@ export function buildLegoSchemaFromResume(
 
     cardTop += eduCardH + 30;
 
-    const totalPages = Math.max(1, Math.ceil(cardTop / A4_PAGE_HEIGHT));
-    const finalHeight = totalPages * A4_PAGE_HEIGHT;
+    const totalPages = Math.max(1, Math.ceil(cardTop / calculateA4PageHeight(820)));
+    const finalHeight = totalPages * calculateA4PageHeight(820);
 
     const schemaResult: IHJSchema = {
       id: `lego-resume-grid-cards-${Date.now()}`,
@@ -3173,8 +3877,8 @@ export function buildLegoSchemaFromResume(
     });
     topPos += 60;
 
-    const totalPages = Math.max(1, Math.ceil(topPos / A4_PAGE_HEIGHT));
-    const finalHeight = totalPages * A4_PAGE_HEIGHT;
+    const totalPages = Math.max(1, Math.ceil(topPos / calculateA4PageHeight(820)));
+    const finalHeight = totalPages * calculateA4PageHeight(820);
 
     const schemaResult: IHJSchema = {
       id: `lego-resume-minimal-${Date.now()}`,
@@ -3485,8 +4189,8 @@ export function buildLegoSchemaFromResume(
     });
     topPos += 45;
 
-    const totalPages = Math.max(1, Math.ceil(topPos / A4_PAGE_HEIGHT));
-    const finalHeight = totalPages * A4_PAGE_HEIGHT;
+    const totalPages = Math.max(1, Math.ceil(topPos / calculateA4PageHeight(820)));
+    const finalHeight = totalPages * calculateA4PageHeight(820);
 
     const schemaResult: IHJSchema = {
       id: `lego-resume-classic-${Date.now()}`,
@@ -3787,8 +4491,8 @@ export function buildLegoSchemaFromResume(
   });
   topPos += 45;
 
-  const totalPages = Math.max(1, Math.ceil(topPos / A4_PAGE_HEIGHT));
-  const finalHeight = totalPages * A4_PAGE_HEIGHT;
+  const totalPages = Math.max(1, Math.ceil(topPos / calculateA4PageHeight(820)));
+  const finalHeight = totalPages * calculateA4PageHeight(820);
 
   const schemaResult: IHJSchema = {
     id: `lego-resume-${templateId}-${Date.now()}`,

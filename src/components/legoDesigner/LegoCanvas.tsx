@@ -2,11 +2,10 @@ import React, { useState, useRef, useEffect } from 'react';
 import { useLegoDesignerStore } from '@/store/lego-designer-store';
 import { useShallow } from 'zustand/react/shallow';
 import { WidgetRenderer } from './widgets/WidgetRenderer';
-import type { IWidget } from '@/types/lego';
+import type { IWidget, IHJSchema } from '@/types/lego';
 import { Layers, Copy, Trash2, ArrowUp, ArrowDown, Maximize, Maximize2, Minimize2, Sparkles } from 'lucide-react';
-import { calculateTagWidth, reflowCanvasWidgetsForPagination } from '@/lib/lego-adapter';
+import { calculateTagWidth, reflowCanvasWidgetsForPagination, calculateA4PageHeight } from '@/lib/lego-adapter';
 
-const A4_PAGE_HEIGHT = 1160;
 const SNAP_THRESHOLD = 5; // Pixels distance for magnetic snapping
 
 const isTextWidget = (componentName: string) =>
@@ -37,6 +36,7 @@ export const LegoCanvas: React.FC<LegoCanvasProps> = ({ isFullScreen, onToggleFu
     duplicateWidget,
     moveWidgetLayer,
     pushHistoryState,
+    commitHistorySnapshot,
     undo,
     redo,
     alignWidgets,
@@ -57,6 +57,7 @@ export const LegoCanvas: React.FC<LegoCanvasProps> = ({ isFullScreen, onToggleFu
     duplicateWidget: state.duplicateWidget,
     moveWidgetLayer: state.moveWidgetLayer,
     pushHistoryState: state.pushHistoryState,
+    commitHistorySnapshot: state.commitHistorySnapshot,
     undo: state.undo,
     redo: state.redo,
     alignWidgets: state.alignWidgets,
@@ -83,11 +84,15 @@ export const LegoCanvas: React.FC<LegoCanvasProps> = ({ isFullScreen, onToggleFu
     initialHeight: number;
     widgetId: string;
     initialPositions: Record<string, { left: number; top: number }>;
+    hasMoved: boolean;
+    snapshotBeforeDrag: IHJSchema;
   } | null>(null);
 
-  // Rubberband / Box selection state
+  // Rubberband / Box selection state (scoped to specific page)
   const [selectionBox, setSelectionBox] = useState<{
     isSelecting: boolean;
+    pageIndex: number;
+    pageId: string;
     startX: number;
     startY: number;
     currentX: number;
@@ -101,30 +106,32 @@ export const LegoCanvas: React.FC<LegoCanvasProps> = ({ isFullScreen, onToggleFu
   });
 
   const canvasRef = useRef<HTMLDivElement>(null);
-  const pageRef = useRef<HTMLDivElement>(null);
 
   // Close context menu & clear selection on canvas background click
   const handleCanvasClick = () => {
     if (contextMenu) setContextMenu(null);
   };
 
-  const handlePageMouseDown = (e: React.MouseEvent) => {
+  const handlePagePointerDown = (e: React.PointerEvent, pageIndex: number, pageId: string) => {
     if (contextMenu) setContextMenu(null);
 
-    // If clicking directly on page background, initialize rubberband box selection
     const target = e.target as HTMLElement;
-    if (target.classList.contains('canvas-page-bg') || target.id === 'lego-canvas-page') {
+    const isPageBg = target.classList.contains('canvas-page-bg') || target.id.startsWith('lego-canvas-page');
+    if (isPageBg) {
       if (!e.shiftKey) {
         setSelectedWidgetIds([]);
       }
 
-      if (pageRef.current) {
-        const rect = pageRef.current.getBoundingClientRect();
+      const pageEl = document.getElementById(`lego-canvas-page-${pageId}`) || (e.currentTarget as HTMLElement);
+      if (pageEl) {
+        const rect = pageEl.getBoundingClientRect();
         const startX = (e.clientX - rect.left) / scale;
         const startY = (e.clientY - rect.top) / scale;
 
         setSelectionBox({
           isSelecting: true,
+          pageIndex,
+          pageId,
           startX,
           startY,
           currentX: startX,
@@ -134,8 +141,8 @@ export const LegoCanvas: React.FC<LegoCanvasProps> = ({ isFullScreen, onToggleFu
     }
   };
 
-  // Start dragging a widget
-  const handleWidgetMouseDown = (e: React.MouseEvent, widget: IWidget) => {
+  // Start dragging a widget with pointer capture and deferred history
+  const handleWidgetPointerDown = (e: React.PointerEvent, widget: IWidget) => {
     e.stopPropagation();
 
     // Format painter mode
@@ -161,7 +168,11 @@ export const LegoCanvas: React.FC<LegoCanvasProps> = ({ isFullScreen, onToggleFu
       }
     }
 
-    pushHistoryState();
+    try {
+      (e.currentTarget as HTMLElement)?.setPointerCapture?.(e.pointerId);
+    } catch {
+      // Ignore
+    }
 
     // Store initial positions of all selected widgets for batch moving
     const activeIds = isShift
@@ -187,16 +198,22 @@ export const LegoCanvas: React.FC<LegoCanvasProps> = ({ isFullScreen, onToggleFu
       initialWidth: widget.css.width,
       initialHeight: widget.css.height,
       widgetId: widget.id,
-      initialPositions
+      initialPositions,
+      hasMoved: false,
+      snapshotBeforeDrag: JSON.parse(JSON.stringify(schema))
     });
   };
 
-  // Start resizing a widget
-  const handleResizeMouseDown = (e: React.MouseEvent, widget: IWidget, handle: string) => {
+  // Start resizing a widget with pointer capture and deferred history
+  const handleResizePointerDown = (e: React.PointerEvent, widget: IWidget, handle: string) => {
     e.stopPropagation();
     setSelectedWidgetId(widget.id);
 
-    pushHistoryState();
+    try {
+      (e.currentTarget as HTMLElement)?.setPointerCapture?.(e.pointerId);
+    } catch {
+      // Ignore
+    }
 
     setDragState({
       isDragging: false,
@@ -209,41 +226,43 @@ export const LegoCanvas: React.FC<LegoCanvasProps> = ({ isFullScreen, onToggleFu
       initialWidth: widget.css.width,
       initialHeight: widget.css.height,
       widgetId: widget.id,
-      initialPositions: { [widget.id]: { left: widget.css.left, top: widget.css.top } }
+      initialPositions: { [widget.id]: { left: widget.css.left, top: widget.css.top } },
+      hasMoved: false,
+      snapshotBeforeDrag: JSON.parse(JSON.stringify(schema))
     });
   };
 
-  // Drag & Resize & Rubberband Selection Mouse Move
-  const handleMouseMove = (e: React.MouseEvent) => {
+  // Drag & Resize & Rubberband Selection Pointer Move
+  const handlePointerMove = (e: React.PointerEvent) => {
     // 1. Rubberband Selection
-    if (selectionBox?.isSelecting && pageRef.current) {
-      const rect = pageRef.current.getBoundingClientRect();
-      const currentX = (e.clientX - rect.left) / scale;
-      const currentY = (e.clientY - rect.top) / scale;
+    if (selectionBox?.isSelecting) {
+      const pageEl = document.getElementById(`lego-canvas-page-${selectionBox.pageId}`);
+      if (pageEl) {
+        const rect = pageEl.getBoundingClientRect();
+        const currentX = (e.clientX - rect.left) / scale;
+        const currentY = (e.clientY - rect.top) / scale;
 
-      setSelectionBox((prev) => (prev ? { ...prev, currentX, currentY } : null));
+        setSelectionBox((prev) => (prev ? { ...prev, currentX, currentY } : null));
 
-      const boxLeft = Math.min(selectionBox.startX, currentX);
-      const boxTop = Math.min(selectionBox.startY, currentY);
-      const boxRight = Math.max(selectionBox.startX, currentX);
-      const boxBottom = Math.max(selectionBox.startY, currentY);
+        const boxLeft = Math.min(selectionBox.startX, currentX);
+        const boxTop = Math.min(selectionBox.startY, currentY);
+        const boxRight = Math.max(selectionBox.startX, currentX);
+        const boxBottom = Math.max(selectionBox.startY, currentY);
 
-      // Check collision with all widgets
-      const intersectedIds: string[] = [];
-      for (const page of schema.componentsTree || []) {
-        for (const w of page.children || []) {
-          const wLeft = w.css.left;
-          const wTop = w.css.top;
-          const wRight = w.css.left + w.css.width;
-          const wBottom = w.css.top + w.css.height;
+        const targetPage = schema.componentsTree?.[selectionBox.pageIndex];
+        const intersectedIds: string[] = [];
+        for (const w of targetPage?.children || []) {
+          const wLeft = Number(w.css.left) || 0;
+          const wTop = Number(w.css.top) || 0;
+          const wRight = wLeft + (Number(w.css.width) || 0);
+          const wBottom = wTop + (Number(w.css.height) || 0);
 
-          // AABB intersection check
           if (wLeft < boxRight && wRight > boxLeft && wTop < boxBottom && wBottom > boxTop) {
             intersectedIds.push(w.id);
           }
         }
+        setSelectedWidgetIds(intersectedIds);
       }
-      setSelectedWidgetIds(intersectedIds);
       return;
     }
 
@@ -253,10 +272,14 @@ export const LegoCanvas: React.FC<LegoCanvasProps> = ({ isFullScreen, onToggleFu
     const rawDeltaX = (e.clientX - dragState.startX) / scale;
     const rawDeltaY = (e.clientY - dragState.startY) / scale;
 
-    const pageWidgets: IWidget[] = [];
-    for (const page of schema.componentsTree || []) {
-      if (page.children) pageWidgets.push(...page.children);
+    if (!dragState.hasMoved && (Math.abs(rawDeltaX) > 1.5 || Math.abs(rawDeltaY) > 1.5)) {
+      dragState.hasMoved = true;
     }
+
+    const targetPage = schema.componentsTree?.find((p) =>
+      p.children?.some((w) => w.id === dragState.widgetId)
+    );
+    const pageWidgets: IWidget[] = targetPage?.children || [];
 
     const activeIds = selectedWidgetIds.includes(dragState.widgetId) ? selectedWidgetIds : [dragState.widgetId];
     const unselectedWidgets = pageWidgets.filter((w) => !activeIds.includes(w.id));
@@ -365,8 +388,20 @@ export const LegoCanvas: React.FC<LegoCanvasProps> = ({ isFullScreen, onToggleFu
     }
   };
 
-  const handleMouseUp = () => {
-    if (dragState) setDragState(null);
+  const handlePointerUp = (e?: React.PointerEvent) => {
+    if (e) {
+      try {
+        (e.target as HTMLElement)?.releasePointerCapture?.(e.pointerId);
+      } catch {
+        // Ignore
+      }
+    }
+    if (dragState) {
+      if (dragState.hasMoved) {
+        commitHistorySnapshot(dragState.snapshotBeforeDrag);
+      }
+      setDragState(null);
+    }
     if (selectionBox) setSelectionBox(null);
     setGuides({ vertical: [], horizontal: [] });
   };
@@ -436,27 +471,13 @@ export const LegoCanvas: React.FC<LegoCanvasProps> = ({ isFullScreen, onToggleFu
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [selectedWidgetIds, batchDeleteWidgets, batchMoveWidgets, schema, undo, redo]);
 
-  const canvasHeight = schema.css?.height || 1160;
-  const pageBreakCount = Math.floor((canvasHeight - 20) / A4_PAGE_HEIGHT);
+  const canvasWidth = schema.css?.width || 820;
+  const pageHeight = calculateA4PageHeight(canvasWidth);
+  const canvasHeight = schema.css?.height || pageHeight;
+  const pageBreakCount = Math.floor((canvasHeight - 20) / pageHeight);
   const pageBreaks: number[] = [];
   for (let i = 1; i <= pageBreakCount; i++) {
-    pageBreaks.push(i * A4_PAGE_HEIGHT);
-  }
-
-  // Calculate Rubberband Selection Box DOM coordinates
-  let selectionBoxStyle: React.CSSProperties | null = null;
-  if (selectionBox?.isSelecting) {
-    const boxLeft = Math.min(selectionBox.startX, selectionBox.currentX);
-    const boxTop = Math.min(selectionBox.startY, selectionBox.currentY);
-    const boxWidth = Math.abs(selectionBox.currentX - selectionBox.startX);
-    const boxHeight = Math.abs(selectionBox.currentY - selectionBox.startY);
-
-    selectionBoxStyle = {
-      left: `${boxLeft}px`,
-      top: `${boxTop}px`,
-      width: `${boxWidth}px`,
-      height: `${boxHeight}px`
-    };
+    pageBreaks.push(i * pageHeight);
   }
 
   return (
@@ -466,28 +487,46 @@ export const LegoCanvas: React.FC<LegoCanvasProps> = ({ isFullScreen, onToggleFu
         isFormatPainterActive ? 'cursor-crosshair' : ''
       }`}
       onClick={handleCanvasClick}
-      onMouseMove={handleMouseMove}
-      onMouseUp={handleMouseUp}
+      onPointerMove={handlePointerMove}
+      onPointerUp={handlePointerUp}
+      onPointerCancel={handlePointerUp}
     >
       <div
         className="transition-transform origin-top duration-75 flex flex-col gap-8 items-center"
         style={{ transform: `scale(${scale})` }}
       >
-        {(schema?.componentsTree || []).map((page) => {
+        {(schema?.componentsTree || []).map((page, pageIndex) => {
+          const pageId = page.id || `page-${pageIndex + 1}`;
           const pagePadding = schema.css?.pagePadding || { top: 0, right: 0, bottom: 0, left: 0 };
           const hasPadding = pagePadding.top > 0 || pagePadding.right > 0 || pagePadding.bottom > 0 || pagePadding.left > 0;
+
+          // Calculate Rubberband Selection Box DOM coordinates for this specific page
+          let selectionBoxStyle: React.CSSProperties | null = null;
+          if (selectionBox?.isSelecting && selectionBox.pageId === pageId) {
+            const boxLeft = Math.min(selectionBox.startX, selectionBox.currentX);
+            const boxTop = Math.min(selectionBox.startY, selectionBox.currentY);
+            const boxWidth = Math.abs(selectionBox.currentX - selectionBox.startX);
+            const boxHeight = Math.abs(selectionBox.currentY - selectionBox.startY);
+
+            selectionBoxStyle = {
+              left: `${boxLeft}px`,
+              top: `${boxTop}px`,
+              width: `${boxWidth}px`,
+              height: `${boxHeight}px`
+            };
+          }
+
           return (
           <div
-            key={page.id || 'page-1'}
-            ref={pageRef}
-            id="lego-canvas-page"
+            key={pageId}
+            id={`lego-canvas-page-${pageId}`}
             className="canvas-page-bg relative bg-white shadow-2xl rounded-sm border border-slate-300 overflow-hidden"
             style={{
               width: `${schema.css?.width || 820}px`,
               height: `${canvasHeight}px`
             }}
             data-page-padding={JSON.stringify(pagePadding)}
-            onMouseDown={handlePageMouseDown}
+            onPointerDown={(e) => handlePagePointerDown(e, pageIndex, pageId)}
           >
             {/* Page Padding / Margin Safe Zone Guides */}
             {hasPadding && (
@@ -570,7 +609,7 @@ export const LegoCanvas: React.FC<LegoCanvasProps> = ({ isFullScreen, onToggleFu
                     zIndex: widget.css.zIndex || 1
                   }}
                   data-widget-id={widget.id}
-                  onMouseDown={(e) => handleWidgetMouseDown(e, widget)}
+                  onPointerDown={(e) => handleWidgetPointerDown(e, widget)}
                   onContextMenu={(e) => handleContextMenu(e, widget.id)}
                 >
                   <WidgetRenderer widget={widget} />
@@ -593,7 +632,7 @@ export const LegoCanvas: React.FC<LegoCanvasProps> = ({ isFullScreen, onToggleFu
                           <div
                             key={handle}
                             className={`absolute w-3 h-3 bg-white border-2 border-blue-600 rounded-full z-50 ${posClass}`}
-                            onMouseDown={(e) => handleResizeMouseDown(e, widget, handle)}
+                            onPointerDown={(e) => handleResizePointerDown(e, widget, handle)}
                           />
                         );
                       })}

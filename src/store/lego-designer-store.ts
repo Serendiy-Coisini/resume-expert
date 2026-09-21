@@ -157,6 +157,7 @@ interface LegoDesignerState {
 
   // Actions
   pushHistoryState: () => void;
+  commitHistorySnapshot: (previousSchema: IHJSchema) => void;
   setSchema: (schema: IHJSchema | Record<string, unknown> | unknown, saveHistory?: boolean) => void;
   setSelectedWidgetId: (id: string | null) => void;
   setSelectedWidgetIds: (ids: string[]) => void;
@@ -231,6 +232,16 @@ export const useLegoDesignerStore = create<LegoDesignerState>((set, get) => {
       set(historyUpdate);
     },
 
+    commitHistorySnapshot: (previousSchema) => {
+      const { undoStack } = get();
+      const cloned = deepClone(previousSchema);
+      const newUndo = [...undoStack, cloned];
+      if (newUndo.length > MAX_HISTORY_LIMIT) {
+        newUndo.shift();
+      }
+      set({ undoStack: newUndo, redoStack: [] });
+    },
+
     setSchema: (newSchema, saveHistory = true) => {
       const normalized = normalizeLegoSchema(newSchema);
       set((state) => {
@@ -246,20 +257,53 @@ export const useLegoDesignerStore = create<LegoDesignerState>((set, get) => {
       });
     },
 
-    setSelectedWidgetId: (id) =>
-      set({
-        selectedWidgetId: id,
-        selectedWidgetIds: id ? [id] : []
-      }),
+    setSelectedWidgetId: (id) => {
+      const { schema } = get();
+      if (!id) {
+        set({ selectedWidgetId: null, selectedWidgetIds: [] });
+        return;
+      }
+      let exists = false;
+      for (const page of schema.componentsTree || []) {
+        if (page.children?.some((w) => w.id === id)) {
+          exists = true;
+          break;
+        }
+      }
+      if (exists) {
+        set({
+          selectedWidgetId: id,
+          selectedWidgetIds: [id]
+        });
+      } else {
+        set({ selectedWidgetId: null, selectedWidgetIds: [] });
+      }
+    },
 
-    setSelectedWidgetIds: (ids) =>
+    setSelectedWidgetIds: (ids) => {
+      const { schema } = get();
+      const validSet = new Set<string>();
+      for (const page of schema.componentsTree || []) {
+        for (const w of page.children || []) validSet.add(w.id);
+      }
+      const filtered = ids.filter((id) => validSet.has(id));
       set({
-        selectedWidgetIds: ids,
-        selectedWidgetId: ids.length > 0 ? ids[ids.length - 1] : null
-      }),
+        selectedWidgetIds: filtered,
+        selectedWidgetId: filtered.length > 0 ? filtered[filtered.length - 1] : null
+      });
+    },
 
     toggleWidgetSelection: (id, isMulti = false) => {
-      const { selectedWidgetIds } = get();
+      const { schema, selectedWidgetIds } = get();
+      let existsInDoc = false;
+      for (const p of schema.componentsTree || []) {
+        if (p.children?.some((w) => w.id === id)) {
+          existsInDoc = true;
+          break;
+        }
+      }
+      if (!existsInDoc) return;
+
       if (!isMulti) {
         set({
           selectedWidgetId: id,
@@ -440,10 +484,11 @@ export const useLegoDesignerStore = create<LegoDesignerState>((set, get) => {
         page.children = page.children.filter((item) => !targets.includes(item.id));
       }
 
+      const remainingIds = (selectedWidgetIds || []).filter((id) => !targets.includes(id));
       set({
         schema: newSchema,
-        selectedWidgetId: null,
-        selectedWidgetIds: [],
+        selectedWidgetIds: remainingIds,
+        selectedWidgetId: remainingIds.length > 0 ? remainingIds[remainingIds.length - 1] : null,
         ...historyUpdate
       });
     },
@@ -733,7 +778,8 @@ export const useLegoDesignerStore = create<LegoDesignerState>((set, get) => {
 
       set({
         schema: newSchema,
-        selectedWidgetId: lastId,
+        selectedWidgetId: lastId || null,
+        selectedWidgetIds: lastId ? [lastId] : [],
         ...historyUpdate
       });
     },
@@ -744,7 +790,7 @@ export const useLegoDesignerStore = create<LegoDesignerState>((set, get) => {
     },
 
     deleteWidget: (widgetId, saveHistory = true) => {
-      const { schema, selectedWidgetId } = get();
+      const { schema, selectedWidgetIds } = get();
       const historyUpdate = saveHistory ? saveStateToHistory(schema) : {};
       const newSchema = deepClone(schema);
 
@@ -757,9 +803,12 @@ export const useLegoDesignerStore = create<LegoDesignerState>((set, get) => {
         }
       }
 
+      const remainingIds = (selectedWidgetIds || []).filter((id) => id !== widgetId);
+
       set({
         schema: newSchema,
-        selectedWidgetId: selectedWidgetId === widgetId ? null : selectedWidgetId,
+        selectedWidgetIds: remainingIds,
+        selectedWidgetId: remainingIds.length > 0 ? remainingIds[remainingIds.length - 1] : null,
         ...historyUpdate
       });
     },
@@ -793,6 +842,7 @@ export const useLegoDesignerStore = create<LegoDesignerState>((set, get) => {
       set({
         schema: newSchema,
         selectedWidgetId: duplicated.id,
+        selectedWidgetIds: [duplicated.id],
         ...historyUpdate
       });
     },
@@ -857,49 +907,73 @@ export const useLegoDesignerStore = create<LegoDesignerState>((set, get) => {
     },
 
     deletePage: (pageIndex) => {
-      const { schema, pageActiveIndex } = get();
+      const { schema, pageActiveIndex, selectedWidgetIds } = get();
       if (schema.componentsTree.length <= 1) return; // Keep at least 1 page
 
       const historyUpdate = saveStateToHistory(schema);
       const newSchema = deepClone(schema);
       newSchema.componentsTree.splice(pageIndex, 1);
 
+      const validSet = new Set<string>();
+      for (const p of newSchema.componentsTree) {
+        for (const w of p.children || []) validSet.add(w.id);
+      }
+      const remainingIds = (selectedWidgetIds || []).filter((id) => validSet.has(id));
+
       set({
         schema: newSchema,
         pageActiveIndex: Math.min(pageActiveIndex, newSchema.componentsTree.length - 1),
+        selectedWidgetIds: remainingIds,
+        selectedWidgetId: remainingIds.length > 0 ? remainingIds[remainingIds.length - 1] : null,
         ...historyUpdate
       });
     },
 
     undo: () => {
-      const { undoStack, redoStack, schema } = get();
+      const { undoStack, redoStack, schema, selectedWidgetIds } = get();
       if (undoStack.length === 0) return;
 
       const previousSchema = undoStack[undoStack.length - 1];
       const newUndo = undoStack.slice(0, undoStack.length - 1);
       const newRedo = [deepClone(schema), ...redoStack];
+      const targetSchema = deepClone(previousSchema);
+
+      const validSet = new Set<string>();
+      for (const p of targetSchema.componentsTree || []) {
+        for (const w of p.children || []) validSet.add(w.id);
+      }
+      const remainingIds = (selectedWidgetIds || []).filter((id) => validSet.has(id));
 
       set({
-        schema: deepClone(previousSchema),
+        schema: targetSchema,
         undoStack: newUndo,
         redoStack: newRedo,
-        selectedWidgetId: null
+        selectedWidgetIds: remainingIds,
+        selectedWidgetId: remainingIds.length > 0 ? remainingIds[remainingIds.length - 1] : null
       });
     },
 
     redo: () => {
-      const { undoStack, redoStack, schema } = get();
+      const { undoStack, redoStack, schema, selectedWidgetIds } = get();
       if (redoStack.length === 0) return;
 
       const nextSchema = redoStack[0];
       const newRedo = redoStack.slice(1);
       const newUndo = [...undoStack, deepClone(schema)];
+      const targetSchema = deepClone(nextSchema);
+
+      const validSet = new Set<string>();
+      for (const p of targetSchema.componentsTree || []) {
+        for (const w of p.children || []) validSet.add(w.id);
+      }
+      const remainingIds = (selectedWidgetIds || []).filter((id) => validSet.has(id));
 
       set({
-        schema: deepClone(nextSchema),
+        schema: targetSchema,
         undoStack: newUndo,
         redoStack: newRedo,
-        selectedWidgetId: null
+        selectedWidgetIds: remainingIds,
+        selectedWidgetId: remainingIds.length > 0 ? remainingIds[remainingIds.length - 1] : null
       });
     },
 

@@ -33,6 +33,8 @@ export interface IWidgetCss {
   opacity?: number;
   clipPath?: string;
   textDecoration?: string;
+  textShadow?: string;
+  boxShadow?: string;
   [key: string]: unknown;
 }
 
@@ -73,6 +75,8 @@ export interface IWidget {
   css: IWidgetCss;
   dataSource: IWidgetDataSource;
   customProps?: Record<string, unknown>;
+  binding?: string;
+  section?: string;
 }
 
 export interface IPageComponent {

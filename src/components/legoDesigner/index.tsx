@@ -58,16 +58,18 @@ export const LegoDesigner: React.FC<LegoDesignerProps> = ({
 
   const containerRef = useRef<HTMLDivElement>(null);
   const lastTemplateRef = useRef<string | null>(null);
+  // Ref bridging Toolbar's ImportResumeDialog opener → LeftComList's onImportResume.
+  // This avoids a second dialog instance in LeftComList while keeping dialog state in Toolbar.
+  const importOpenerRef = useRef<(() => void) | null>(null);
   const currentSourceKey = getResumeSourceKey();
   const staleCanvas = schema.componentsTree.some((page) => page.children?.length) && sourceKey !== currentSourceKey;
 
-  // Initialize or re-template schema only when appropriate (first load, empty canvas, or explicit layout template change)
+  // Initialize schema only on first load when canvas is empty
   useEffect(() => {
     if (staleCanvas) return;
     const currentChildren = schema.componentsTree?.[0]?.children || [];
-    const isTemplateChanged = lastTemplateRef.current !== null && lastTemplateRef.current !== selectedTemplate;
 
-    if (currentChildren.length === 0 || isTemplateChanged) {
+    if (currentChildren.length === 0) {
       const initialSchema = buildLegoSchemaFromResume(
         userInput,
         effectiveAnalysisResult,
@@ -183,6 +185,7 @@ export const LegoDesigner: React.FC<LegoDesignerProps> = ({
         isFullScreen={isFullScreen}
         onToggleFullScreen={toggleFullScreen}
         standalone={standalone}
+        onRegisterImportOpener={(fn) => { importOpenerRef.current = fn; }}
       />
 
       {/* Mobile view panel switcher (md:hidden) */}
@@ -226,6 +229,7 @@ export const LegoDesigner: React.FC<LegoDesignerProps> = ({
             width={leftWidth}
             isCollapsed={leftCollapsed}
             onToggleCollapse={() => setLeftCollapsed(!leftCollapsed)}
+            onImportResume={() => importOpenerRef.current?.()}
           />
         </div>
 

@@ -1,8 +1,11 @@
 import React, { useRef, useState, useEffect, useCallback } from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import { useLegoDesignerStore } from '@/store/lego-designer-store';
 import { useResumeStore } from '@/store/resume-store';
-import { buildLegoSchemaFromResume, fillAiDataIntoExistingSchema, reflowCanvasWidgetsForPagination } from '@/lib/lego-adapter';
+import { buildLegoSchemaFromResume, fillAiDataIntoExistingSchema, reflowCanvasWidgetsForPagination, hasManualCanvasEdits, extractResumeFromLegoSchema } from '@/lib/lego-adapter';
+import { validateAndNormalizeLegoJson } from '@/lib/schema-normalizer';
 import { printLegoCanvas } from './utils/printLego';
+import { exportResumeAsWord } from '@/lib/utils';
 import { SaveTemplateDialog } from './SaveTemplateDialog';
 import { ImportResumeDialog } from './ImportResumeDialog';
 import { PhotoManagerDialog } from './PhotoManagerDialog';
@@ -21,27 +24,30 @@ import {
   Minimize2,
   Upload,
   Download,
-  ChevronDown,
-  Save,
-  FolderOpen,
-  RotateCcw,
-  BookmarkPlus,
-  Paintbrush,
-  FileUp,
-  Camera,
   Palette,
+  ChevronDown,
   Check,
+  RotateCcw,
+  Camera,
+  Paintbrush,
+  FolderOpen,
+  FileUp,
+  Save,
   MoreHorizontal,
-  ChevronRight
+  ChevronRight,
+  BookmarkPlus
 } from 'lucide-react';
 
 interface ToolbarProps {
   isFullScreen: boolean;
   onToggleFullScreen: () => void;
   standalone?: boolean;
+  /** Optional imperative handle: when provided, calling this sets importResumeDialogOpen=true
+   *  in Toolbar without a second dialog instance. Used by LeftComList's import button. */
+  onRegisterImportOpener?: (openFn: () => void) => void;
 }
 
-export const Toolbar: React.FC<ToolbarProps> = ({ isFullScreen, onToggleFullScreen, standalone }) => {
+export const Toolbar: React.FC<ToolbarProps> = ({ isFullScreen, onToggleFullScreen, standalone, onRegisterImportOpener }) => {
   const {
     scale,
     setScale,
@@ -56,8 +62,43 @@ export const Toolbar: React.FC<ToolbarProps> = ({ isFullScreen, onToggleFullScre
     selectedWidgetId,
     isFormatPainterActive,
     toggleFormatPainter
-  } = useLegoDesignerStore();
-  const { userInput, analysisResult, partialAnalysisResult, templateOptions, setTemplateOptions, customTemplateHTML, setSelectedTemplate } = useResumeStore();
+  } = useLegoDesignerStore(useShallow((s) => ({
+    scale: s.scale,
+    setScale: s.setScale,
+    undo: s.undo,
+    redo: s.redo,
+    undoStack: s.undoStack,
+    redoStack: s.redoStack,
+    pushHistoryState: s.pushHistoryState,
+    setSchema: s.setSchema,
+    resetSchema: s.resetSchema,
+    schema: s.schema,
+    selectedWidgetId: s.selectedWidgetId,
+    isFormatPainterActive: s.isFormatPainterActive,
+    toggleFormatPainter: s.toggleFormatPainter
+  })));
+
+  const {
+    userInput,
+    analysisResult,
+    partialAnalysisResult,
+    templateOptions,
+    setTemplateOptions,
+    customTemplateHTML,
+    setSelectedTemplate,
+    selectedTemplate,
+    setAnalysisResult
+  } = useResumeStore(useShallow((s) => ({
+    userInput: s.userInput,
+    analysisResult: s.analysisResult,
+    partialAnalysisResult: s.partialAnalysisResult,
+    templateOptions: s.templateOptions,
+    setTemplateOptions: s.setTemplateOptions,
+    customTemplateHTML: s.customTemplateHTML,
+    setSelectedTemplate: s.setSelectedTemplate,
+    selectedTemplate: s.selectedTemplate,
+    setAnalysisResult: s.setAnalysisResult
+  })));
   const effectiveAnalysisResult = analysisResult || partialAnalysisResult;
 
   const handleClearCanvas = () => {
@@ -75,6 +116,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({ isFullScreen, onToggleFullScre
   const [showTplMenu, setShowTplMenu] = useState(false);
   const [showThemeMenu, setShowThemeMenu] = useState(false);
   const [showMoreMenu, setShowMoreMenu] = useState(false);
+  const [templateSwitchDialog, setTemplateSwitchDialog] = useState<{ targetId: TemplateId; targetName: string } | null>(null);
   const [showPrintTipModal, setShowPrintTipModal] = useState(false);
   const [saveDialogOpen, setSaveDialogOpen] = useState(false);
   const [importResumeDialogOpen, setImportResumeDialogOpen] = useState(false);
@@ -88,6 +130,12 @@ export const Toolbar: React.FC<ToolbarProps> = ({ isFullScreen, onToggleFullScre
     const { savedTime } = loadLegoDraft();
     if (savedTime) setDraftTime(savedTime);
   }, []);
+
+  // Register the import dialog opener with the parent component so that
+  // LeftComList's import button can open the single Toolbar-managed dialog.
+  useEffect(() => {
+    onRegisterImportOpener?.(() => setImportResumeDialogOpen(true));
+  }, [onRegisterImportOpener]);
 
   const currentThemeColor = (schema?.css as Record<string, unknown>)?.themeColor as string || templateOptions.themeColor || '#1e3a8a';
   const hasAvatarOnCanvas = schema?.componentsTree?.[0]?.children?.some(
@@ -175,7 +223,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({ isFullScreen, onToggleFullScre
     }
   };
 
-  const handleImportTemplate = (tplId: string) => {
+  const handleSwitchTemplate = (tplId: string) => {
     setShowTplMenu(false);
 
     if (tplId === 'blank') {
@@ -201,6 +249,11 @@ export const Toolbar: React.FC<ToolbarProps> = ({ isFullScreen, onToggleFullScre
     const targetTemplateId = (tplId === 'classic' ? 'classic-minimal' : tplId === 'modern' ? 'modern-sidebar' : tplId) as TemplateId;
     const name = tplNames[tplId] || tplId;
 
+    if (hasManualCanvasEdits(schema, effectiveAnalysisResult?.finalResume)) {
+      setTemplateSwitchDialog({ targetId: targetTemplateId, targetName: name });
+      return;
+    }
+
     if (confirm(`确定切换为【${name}】排版风格吗？\n\n系统将自动保留您的简历文本内容并应用新模板排版。当前画布上未保存的自定义微调将被替换。`)) {
       setSelectedTemplate(targetTemplateId);
       const freshSchema = buildLegoSchemaFromResume(
@@ -213,6 +266,8 @@ export const Toolbar: React.FC<ToolbarProps> = ({ isFullScreen, onToggleFullScre
       setSchema(freshSchema, true);
     }
   };
+
+  const handleImportTemplate = handleSwitchTemplate;
 
   const handleSmartPaginationReflow = () => {
     pushHistoryState();
@@ -288,16 +343,38 @@ export const Toolbar: React.FC<ToolbarProps> = ({ isFullScreen, onToggleFullScre
     const file = e.target.files?.[0];
     if (!file) return;
 
+    if (file.size > 10 * 1024 * 1024) {
+      alert('文件过大：导入文件大小不能超过 10MB');
+      e.target.value = '';
+      return;
+    }
+
     const reader = new FileReader();
     reader.onload = (event) => {
       try {
         const parsed = JSON.parse(event.target?.result as string);
-        if (parsed && typeof parsed === 'object') {
-          const filledSchema = fillAiDataIntoExistingSchema(parsed, userInput, analysisResult);
-          setSchema(filledSchema, true);
-          alert('🎉 简历排版导入成功！已自动为您载入版式并智能填入简历内容。');
+        const validation = validateAndNormalizeLegoJson(parsed);
+        if (!validation.success || !validation.data) {
+          alert(`文件格式不正确：${validation.error || '未能识别有效的简历排版 Schema'}`);
+          return;
+        }
+
+        const normalizedSchema = validation.data;
+        const shouldRestoreBackup = confirm(
+          '成功读取简历排版 JSON！请选择载入方式：\n\n' +
+          '• 点击【确定】：恢复备份（默认原样恢复该文件中的所有经历文本与样式）\n' +
+          '• 点击【取消】：仅套用版式（使用当前已填简历的内容重填此排版）'
+        );
+
+        if (shouldRestoreBackup) {
+          // 完整备份恢复（原样保留文本）
+          setSchema(normalizedSchema, true);
+          alert('🎉 简历备份已成功完整恢复！');
         } else {
-          alert('文件格式不正确，请确认选择的是本系统导出的简历排版 JSON 文件。');
+          // 仅套用版式重填
+          const filledSchema = fillAiDataIntoExistingSchema(normalizedSchema, userInput, analysisResult);
+          setSchema(filledSchema, true);
+          alert('🎉 版式已套用，并使用当前简历数据重填！');
         }
       } catch {
         alert('文件读取失败：无法解析该文件，请确保文件是合法的 JSON 格式。');
@@ -1027,7 +1104,20 @@ export const Toolbar: React.FC<ToolbarProps> = ({ isFullScreen, onToggleFullScre
           )}
         </div>
 
-        {/* 5. Export PDF Button */}
+        {/* 5. Export Word & PDF Buttons */}
+        <button
+          type="button"
+          className="px-2 sm:px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 shadow-sm transition-all whitespace-nowrap shrink-0 cursor-pointer border border-slate-600/60"
+          onClick={async () => {
+            const extracted = extractResumeFromLegoSchema(schema, effectiveAnalysisResult?.finalResume);
+            await exportResumeAsWord(extracted, selectedTemplate, customTemplateHTML, templateOptions);
+          }}
+          title="导出基于当前画布修改内容的结构化 Word 文档 (.docx)"
+        >
+          <FileText className="w-3.5 h-3.5 text-blue-400" />
+          <span className="hidden sm:inline">导出 Word</span>
+        </button>
+
         <button
           type="button"
           className="px-2.5 sm:px-3.5 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 shadow-lg shadow-blue-600/30 transition-all whitespace-nowrap shrink-0 cursor-pointer"
@@ -1043,6 +1133,86 @@ export const Toolbar: React.FC<ToolbarProps> = ({ isFullScreen, onToggleFullScre
       <SaveTemplateDialog open={saveDialogOpen} onClose={() => setSaveDialogOpen(false)} />
       <ImportResumeDialog open={importResumeDialogOpen} onClose={() => setImportResumeDialogOpen(false)} />
       <PhotoManagerDialog open={photoDialogOpen} onClose={() => setPhotoDialogOpen(false)} />
+
+      {/* 模板切换保留画布编辑确认弹窗 */}
+      {templateSwitchDialog && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center z-[1100] p-4 animate-in fade-in duration-150">
+          <div className="bg-slate-900 border border-slate-700 rounded-2xl max-w-md w-full p-5 text-white shadow-2xl space-y-4 animate-in zoom-in-95 duration-150">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-amber-500/20 border border-amber-500/40 text-amber-400 flex items-center justify-center shrink-0">
+                <Sparkles className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-sm font-bold text-slate-100">切换排版风格确认</h3>
+                <p className="text-xs text-slate-400">检测到您在当前画布上手工修改过内容</p>
+              </div>
+            </div>
+
+            <p className="text-xs text-slate-300 leading-relaxed">
+              您即将切换为【<span className="text-blue-400 font-semibold">{templateSwitchDialog.targetName}</span>】风格。请选择如何处理您在画布上所作的编辑：
+            </p>
+
+            <div className="space-y-2 pt-1">
+              <button
+                type="button"
+                onClick={() => {
+                  const extracted = extractResumeFromLegoSchema(schema, effectiveAnalysisResult?.finalResume);
+                  if (effectiveAnalysisResult) {
+                    setAnalysisResult({
+                      ...effectiveAnalysisResult,
+                      finalResume: extracted
+                    } as import('@/types/resume').AnalysisResult);
+                  }
+                  setSelectedTemplate(templateSwitchDialog.targetId);
+                  const freshSchema = buildLegoSchemaFromResume(
+                    userInput,
+                    { ...(effectiveAnalysisResult || {}), finalResume: extracted } as import('@/types/resume').AnalysisResult,
+                    templateSwitchDialog.targetId,
+                    templateOptions,
+                    customTemplateHTML
+                  );
+                  setSchema(freshSchema, true);
+                  setTemplateSwitchDialog(null);
+                }}
+                className="w-full p-2.5 rounded-xl text-left bg-blue-600/20 hover:bg-blue-600/35 border border-blue-500/40 hover:border-blue-400 text-xs text-blue-200 hover:text-white transition-all cursor-pointer"
+              >
+                <div className="font-bold text-blue-100">✓ 保留并迁移画布修改（推荐）</div>
+                <div className="text-[11px] text-slate-400 mt-0.5">将您在画布上手工修改的文字、经历同步套用至新模板中</div>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedTemplate(templateSwitchDialog.targetId);
+                  const freshSchema = buildLegoSchemaFromResume(
+                    userInput,
+                    effectiveAnalysisResult,
+                    templateSwitchDialog.targetId,
+                    templateOptions,
+                    customTemplateHTML
+                  );
+                  setSchema(freshSchema, true);
+                  setTemplateSwitchDialog(null);
+                }}
+                className="w-full p-2.5 rounded-xl text-left bg-slate-800 hover:bg-slate-700/80 border border-slate-700 text-xs text-slate-300 hover:text-white transition-all cursor-pointer"
+              >
+                <div className="font-semibold text-slate-200">使用原始分析结果重置</div>
+                <div className="text-[11px] text-slate-400 mt-0.5">放弃画布上的手工文本，重新应用 AI 诊断优化的简历版本</div>
+              </button>
+            </div>
+
+            <div className="flex justify-end pt-1">
+              <button
+                type="button"
+                onClick={() => setTemplateSwitchDialog(null)}
+                className="px-3.5 py-1.5 text-xs text-slate-400 hover:text-white transition-colors cursor-pointer"
+              >
+                取消
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* 打印机设置引导弹窗 */}
       {showPrintTipModal && (

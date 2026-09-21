@@ -1,11 +1,13 @@
 import type { IWidgetTab } from '@/types/lego';
 
+export const DEFAULT_AVATAR_PLACEHOLDER = "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 120 120' fill='%23e2e8f0'><rect width='120' height='120' fill='%23f1f5f9'/><circle cx='60' cy='45' r='24' fill='%2394a3b8'/><path d='M24 105c0-20 16-36 36-36s36 16 36 36' fill='%2394a3b8'/></svg>";
+
 export const WIDGET_CONFIG_LIST: IWidgetTab[] = [
   {
     title: '头像',
     category: 'avatar',
     icon: 'User',
-    dataSource: { avatarSrc: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=300' },
+    dataSource: { avatarSrc: DEFAULT_AVATAR_PLACEHOLDER },
     list: [
       {
         id: '',
@@ -16,7 +18,7 @@ export const WIDGET_CONFIG_LIST: IWidgetTab[] = [
           left: 100, top: 100, width: 120, height: 150, zIndex: 2,
           backgroundColor: '#f1f5f9', borderWidth: 3, borderColor: '#eee', borderStyle: 'solid', borderRadius: 10
         },
-        dataSource: { avatarSrc: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=300' }
+        dataSource: { avatarSrc: DEFAULT_AVATAR_PLACEHOLDER }
       },
       {
         id: '',
@@ -27,7 +29,7 @@ export const WIDGET_CONFIG_LIST: IWidgetTab[] = [
           left: 100, top: 100, width: 120, height: 120, zIndex: 2,
           backgroundColor: '#f1f5f9', borderRadius: '50%'
         },
-        dataSource: { avatarSrc: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=300' }
+        dataSource: { avatarSrc: DEFAULT_AVATAR_PLACEHOLDER }
       },
       {
         id: '',
@@ -35,7 +37,7 @@ export const WIDGET_CONFIG_LIST: IWidgetTab[] = [
         title: '六边形头像',
         description: '六边形头像',
         css: { left: 100, top: 100, width: 120, height: 120, zIndex: 2 },
-        dataSource: { avatarSrc: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=300' }
+        dataSource: { avatarSrc: DEFAULT_AVATAR_PLACEHOLDER }
       },
       {
         id: '',
@@ -43,7 +45,7 @@ export const WIDGET_CONFIG_LIST: IWidgetTab[] = [
         title: '花朵形头像',
         description: '花朵形头像',
         css: { left: 100, top: 100, width: 120, height: 120, zIndex: 2 },
-        dataSource: { avatarSrc: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=300' }
+        dataSource: { avatarSrc: DEFAULT_AVATAR_PLACEHOLDER }
       },
       {
         id: '',
@@ -51,7 +53,7 @@ export const WIDGET_CONFIG_LIST: IWidgetTab[] = [
         title: '八角形头像',
         description: '八角形头像',
         css: { left: 100, top: 100, width: 120, height: 120, zIndex: 2 },
-        dataSource: { avatarSrc: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=300' }
+        dataSource: { avatarSrc: DEFAULT_AVATAR_PLACEHOLDER }
       },
       {
         id: '',
@@ -59,7 +61,7 @@ export const WIDGET_CONFIG_LIST: IWidgetTab[] = [
         title: '菱形头像',
         description: '菱形头像',
         css: { left: 100, top: 100, width: 120, height: 120, zIndex: 2 },
-        dataSource: { avatarSrc: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=300' }
+        dataSource: { avatarSrc: DEFAULT_AVATAR_PLACEHOLDER }
       }
     ]
   },

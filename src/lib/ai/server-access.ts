@@ -24,6 +24,19 @@ export function authorizeServerLLM(request: Request): string {
   return digest.toString("hex");
 }
 
+/**
+ * Safely verifies if the supplied token matches any configured server access token.
+ * Returns the hex digest of the authenticated token, or null if invalid, tampered, or unconfigured.
+ */
+export function verifyServerAccessToken(supplied: string | null | undefined): string | null {
+  if (!supplied || typeof supplied !== "string" || supplied.length < 32 || supplied.length > 256 || !serverAccessConfigured()) {
+    return null;
+  }
+  const digest = createHash("sha256").update(supplied).digest();
+  const valid = accessTokens().some(token => timingSafeEqual(digest, createHash("sha256").update(token).digest()));
+  return valid ? digest.toString("hex") : null;
+}
+
 const usage = new Map<string, { day: number; calls: number; active: number }>();
 let globalActive = 0;
 let globalDay = -1;

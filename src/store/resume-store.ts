@@ -510,5 +510,13 @@ Axure · Figma · Python (数据分析) · SQL · Prompt Optimization · LangCha
 export function getResumeSourceKey(): string {
   const { sessionId, analysisResult, partialAnalysisResult, userInput } = useResumeStore.getState();
   const effectiveResume = analysisResult?.finalResume ?? partialAnalysisResult?.finalResume;
-  return JSON.stringify([sessionId, effectiveResume ?? userInput]);
+  if (effectiveResume) {
+    const cleanPersonalInfo = effectiveResume.personalInfo
+      ? { ...effectiveResume.personalInfo, avatarUrl: undefined }
+      : undefined;
+    const cleanResume = { ...effectiveResume, personalInfo: cleanPersonalInfo };
+    return JSON.stringify([sessionId, cleanResume]);
+  }
+  const cleanUserInput = { ...userInput, avatarUrl: undefined };
+  return JSON.stringify([sessionId, cleanUserInput]);
 }

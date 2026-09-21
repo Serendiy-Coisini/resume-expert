@@ -4,7 +4,6 @@ import { useLegoDesignerStore } from '@/store/lego-designer-store';
 import { useResumeStore } from '@/store/resume-store';
 import { RESUME_MODEL_DATA } from '@/lib/resume-model-data';
 import { SaveTemplateDialog } from './SaveTemplateDialog';
-import { ImportResumeDialog } from './ImportResumeDialog';
 import {
   LayoutGrid,
   Layers,
@@ -35,12 +34,17 @@ interface LeftComListProps {
   width: number;
   isCollapsed: boolean;
   onToggleCollapse: () => void;
+  /** Optional: callback to open the ImportResumeDialog managed by the parent (Toolbar).
+   *  When provided, the button in the left panel will call this instead of opening
+   *  a duplicate dialog instance. */
+  onImportResume?: () => void;
 }
 
 export const LeftComList: React.FC<LeftComListProps> = ({
   width,
   isCollapsed,
-  onToggleCollapse
+  onToggleCollapse,
+  onImportResume
 }) => {
   const [activeTab, setActiveTab] = useState<'widgets' | 'modules' | 'layers' | 'json' | 'templates'>('widgets');
   const {
@@ -64,7 +68,6 @@ export const LeftComList: React.FC<LeftComListProps> = ({
 
   const [copied, setCopied] = useState(false);
   const [saveDialogOpen, setSaveDialogOpen] = useState(false);
-  const [importResumeDialogOpen, setImportResumeDialogOpen] = useState(false);
   const [activeCategoryFilter, setActiveCategoryFilter] = useState<string>('全部');
 
   const handleCopyJson = () => {
@@ -541,7 +544,7 @@ export const LeftComList: React.FC<LeftComListProps> = ({
             </div>
           </div>
           <button
-            onClick={() => setImportResumeDialogOpen(true)}
+            onClick={() => onImportResume?.()}
             className="px-2.5 py-1 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-semibold shrink-0 shadow-sm transition-all cursor-pointer flex items-center gap-1"
           >
             <FileUp className="w-3 h-3" /> 导入
@@ -726,7 +729,6 @@ export const LeftComList: React.FC<LeftComListProps> = ({
       </div>
 
       <SaveTemplateDialog open={saveDialogOpen} onClose={() => setSaveDialogOpen(false)} />
-      <ImportResumeDialog open={importResumeDialogOpen} onClose={() => setImportResumeDialogOpen(false)} />
     </div>
   );
 };

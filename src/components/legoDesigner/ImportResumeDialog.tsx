@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { useLegoDesignerStore } from '@/store/lego-designer-store';
+import { useShallow } from 'zustand/react/shallow';
 import { useInputTask } from '@/lib/use-input-task';
 import { useResumeStore } from '@/store/resume-store';
 import { PRESET_RESUMES, type PresetResumeItem } from '@/lib/preset-resumes';
@@ -9,6 +10,7 @@ import { parseResumeFromText } from '@/lib/resume-parser';
 import { renderPdfPagesToImages } from '@/lib/pdf-to-images';
 import { getAIHeaders } from '@/store/ai-config-store';
 import { buildLegoSchemaFromResume, fillAiDataIntoExistingSchema } from '@/lib/lego-adapter';
+import { validateAndNormalizeStructuredResume } from '@/lib/schema-normalizer';
 import type { FinalResume, AnalysisResult, TemplateId, WorkExperience, ProjectExperience } from '@/types/resume';
 import {
   X,
@@ -98,7 +100,12 @@ React / Next.js · TypeScript · Tailwind CSS · Node.js / NestJS · Go / Gin ·
 北京航空航天大学 · 硕士 · 计算机科学与技术 (2016.09 - 2019.06)`;
 
 export const ImportResumeDialog: React.FC<ImportResumeDialogProps> = ({ open, onClose }) => {
-  const { schema, setSchema } = useLegoDesignerStore();
+  const { schema, setSchema } = useLegoDesignerStore(
+    useShallow((s) => ({
+      schema: s.schema,
+      setSchema: s.setSchema
+    }))
+  );
   const {
     userInput,
     setUserInput,
@@ -108,7 +115,18 @@ export const ImportResumeDialog: React.FC<ImportResumeDialogProps> = ({ open, on
     setSelectedTemplate,
     templateOptions,
     customTemplateHTML
-  } = useResumeStore();
+  } = useResumeStore(
+    useShallow((s) => ({
+      userInput: s.userInput,
+      setUserInput: s.setUserInput,
+      analysisResult: s.analysisResult,
+      setAnalysisResult: s.setAnalysisResult,
+      selectedTemplate: s.selectedTemplate,
+      setSelectedTemplate: s.setSelectedTemplate,
+      templateOptions: s.templateOptions,
+      customTemplateHTML: s.customTemplateHTML
+    }))
+  );
 
   const [activeTab, setActiveTab] = useState<'presets' | 'upload' | 'form' | 'json'>('presets');
   const [selectedPresetId, setSelectedPresetId] = useState<string>('ai-pm');
@@ -187,57 +205,45 @@ export const ImportResumeDialog: React.FC<ImportResumeDialogProps> = ({ open, on
     setJsonText(JSON.stringify(resumeData, null, 2));
   }, [resumeData]);
 
-  // Real-time live parse when rawText changes in upload tab
+  // Real-time live parse when rawText changes in upload tab (local preview only)
   useEffect(() => {
     if (activeTab === 'upload' && rawText.trim().length > 30) {
       const timer = setTimeout(() => {
         try {
-          const { finalResume: parsed, userInput: parsedInput } = parseResumeFromText(rawText);
+          const { finalResume: parsed } = parseResumeFromText(rawText);
           setResumeData(parsed);
-          setUserInput(parsedInput);
         } catch {
           // ignore background typing errors
         }
       }, 300);
       return () => clearTimeout(timer);
     }
-  }, [rawText, activeTab, setUserInput]);
+  }, [rawText, activeTab]);
 
   if (!open) return null;
 
-  // Helper to create a complete type-safe AnalysisResult
-  const createCompleteAnalysisResult = (dataToSync: FinalResume): AnalysisResult => {
+  // Helper to create a clean, type-safe AnalysisResult for imported resume
+  // Do NOT stitch previous resume's JD match score, diagnosis, or questions into the newly imported resume
+  const createFreshAnalysisResult = (dataToSync: FinalResume): AnalysisResult => {
     return {
-      ...(analysisResult || {
-        jdAnalysis: {
-          responsibilities: [],
-          hardRequirements: [],
-          implicitRequirements: [],
-          keywords: [],
-          idealCandidate: '',
-          coreCompetencies: []
-        },
-        diagnosis: {
-          overallScore: 88,
-          dimensionScores: [],
-          mainIssues: [],
-          prioritySuggestions: []
-        },
-        matchItems: [],
-        followUpQuestions: [],
-        optimizedItems: [],
-        interviewPrep: {
-          likelyQuestions: [],
-          evidenceToPrepare: [],
-          possibleExaggerations: [],
-          dataToSupplement: [],
-          selfIntroduction: ''
-        }
-      }),
-      matchItems: analysisResult?.matchItems || [],
-      followUpQuestions: analysisResult?.followUpQuestions || [],
-      optimizedItems: analysisResult?.optimizedItems || [],
-      interviewPrep: analysisResult?.interviewPrep || {
+      jdAnalysis: {
+        responsibilities: [],
+        hardRequirements: [],
+        implicitRequirements: [],
+        keywords: [],
+        idealCandidate: '',
+        coreCompetencies: []
+      },
+      diagnosis: {
+        overallScore: 0,
+        dimensionScores: [],
+        mainIssues: [],
+        prioritySuggestions: []
+      },
+      matchItems: [],
+      followUpQuestions: [],
+      optimizedItems: [],
+      interviewPrep: {
         likelyQuestions: [],
         evidenceToPrepare: [],
         possibleExaggerations: [],
@@ -248,7 +254,7 @@ export const ImportResumeDialog: React.FC<ImportResumeDialogProps> = ({ open, on
     };
   };
 
-  // Sync to Global Resume Store
+  // Sync to Global Resume Store ONLY when user explicitly confirms apply/refill
   const syncToGlobalStore = (dataToSync: FinalResume) => {
     setUserInput({
       targetRole: dataToSync.jobIntent || userInput.targetRole,
@@ -258,7 +264,7 @@ export const ImportResumeDialog: React.FC<ImportResumeDialogProps> = ({ open, on
       originalResume: rawText || userInput.originalResume
     });
 
-    setAnalysisResult(createCompleteAnalysisResult(dataToSync));
+    setAnalysisResult(createFreshAnalysisResult(dataToSync));
   };
 
   // Handle Preset Selection
@@ -296,7 +302,7 @@ export const ImportResumeDialog: React.FC<ImportResumeDialogProps> = ({ open, on
 
       const recTemplate = PRESET_RECOMMENDED_TEMPLATE[preset.id] || targetTemplate;
       syncToGlobalStore(clonedData);
-      const completeAnalysis = createCompleteAnalysisResult(clonedData);
+      const freshAnalysis = createFreshAnalysisResult(clonedData);
 
       const updatedUserInput = {
         ...userInput,
@@ -308,7 +314,7 @@ export const ImportResumeDialog: React.FC<ImportResumeDialogProps> = ({ open, on
       };
 
       if (mode === 'refill') {
-        const filledSchema = fillAiDataIntoExistingSchema(schema, updatedUserInput, completeAnalysis);
+        const filledSchema = fillAiDataIntoExistingSchema(schema, updatedUserInput, freshAnalysis);
         setSchema(filledSchema, true);
         showToast('success', `🎉 已成功将【${preset.title}】数据重填到当前画布！`);
         setTimeout(onClose, 600);
@@ -317,7 +323,7 @@ export const ImportResumeDialog: React.FC<ImportResumeDialogProps> = ({ open, on
         setTargetTemplate(recTemplate);
         const freshSchema = buildLegoSchemaFromResume(
           updatedUserInput,
-          completeAnalysis,
+          freshAnalysis,
           recTemplate,
           templateOptions,
           customTemplateHTML
@@ -346,15 +352,14 @@ export const ImportResumeDialog: React.FC<ImportResumeDialogProps> = ({ open, on
 
     setIsParsing(true);
     try {
-      const { finalResume: parsed, userInput: parsedInput, stats } = parseResumeFromText(textToParse);
+      const { finalResume: parsed, stats } = parseResumeFromText(textToParse);
       setResumeData(parsed);
       setParseStatus({
         type: 'success',
         message: `🎉 智能解析成功！已提取 ${stats.workCount} 段工作经历、${stats.projectCount} 个项目、${stats.skillCount} 项核心技能。`,
         stats
       });
-      setUserInput(parsedInput);
-      showToast('success', '简历文本提取完成，已同步结构化数据！');
+      showToast('success', '简历文本提取完成，已同步结构化预览！');
     } catch (err) {
       setParseStatus({
         type: 'error',
@@ -485,9 +490,8 @@ export const ImportResumeDialog: React.FC<ImportResumeDialogProps> = ({ open, on
 
       if (!task.isCurrent()) return;
       setRawText(extractedText);
-      const { finalResume: parsed, userInput: parsedInput, stats } = parseResumeFromText(extractedText);
+      const { finalResume: parsed, stats } = parseResumeFromText(extractedText);
       setResumeData(parsed);
-      setUserInput(parsedInput);
       setParseStatus({
         type: 'success',
         message: `🎉 文件解析成功！已提取 ${stats.workCount} 段工作经历、${stats.projectCount} 个项目、${stats.skillCount} 项核心技能。`,
@@ -543,7 +547,7 @@ export const ImportResumeDialog: React.FC<ImportResumeDialogProps> = ({ open, on
       }
 
       syncToGlobalStore(dataToApply);
-      const completeAnalysis = createCompleteAnalysisResult(dataToApply);
+      const freshAnalysis = createFreshAnalysisResult(dataToApply);
 
       const updatedUserInput = {
         ...inputToApply,
@@ -553,7 +557,7 @@ export const ImportResumeDialog: React.FC<ImportResumeDialogProps> = ({ open, on
         avatarUrl: dataToApply.personalInfo.avatarUrl
       };
 
-      const filledSchema = fillAiDataIntoExistingSchema(schema, updatedUserInput, completeAnalysis);
+      const filledSchema = fillAiDataIntoExistingSchema(schema, updatedUserInput, freshAnalysis);
       setSchema(filledSchema, true);
 
       showToast('success', '🎉 初始简历数据已成功重填至当前画布！排版与组件位置完好保留。');
@@ -581,7 +585,7 @@ export const ImportResumeDialog: React.FC<ImportResumeDialogProps> = ({ open, on
 
       syncToGlobalStore(dataToApply);
       setSelectedTemplate(targetTemplate);
-      const completeAnalysis = createCompleteAnalysisResult(dataToApply);
+      const freshAnalysis = createFreshAnalysisResult(dataToApply);
 
       const updatedUserInput = {
         ...inputToApply,
@@ -593,7 +597,7 @@ export const ImportResumeDialog: React.FC<ImportResumeDialogProps> = ({ open, on
 
       const freshSchema = buildLegoSchemaFromResume(
         updatedUserInput,
-        completeAnalysis,
+        freshAnalysis,
         targetTemplate,
         templateOptions,
         customTemplateHTML
@@ -713,10 +717,13 @@ export const ImportResumeDialog: React.FC<ImportResumeDialogProps> = ({ open, on
   const handleParseJsonInput = () => {
     try {
       const parsed = JSON.parse(jsonText);
-      if (parsed && typeof parsed === 'object') {
-        setResumeData(parsed);
-        showToast('success', 'JSON 简历数据解析载入成功！');
+      const res = validateAndNormalizeStructuredResume(parsed);
+      if (!res.success) {
+        showToast('error', res.error || 'JSON 简历数据格式不符合规范');
+        return;
       }
+      setResumeData(res.data!);
+      showToast('success', 'JSON 简历数据解析校验通过并载入成功！');
     } catch {
       showToast('error', 'JSON 格式错误，请检查语法');
     }
@@ -814,7 +821,7 @@ export const ImportResumeDialog: React.FC<ImportResumeDialogProps> = ({ open, on
             <User className="w-4 h-4" />
             ✍️ 结构化字段编辑
             <span className="text-[10px] bg-emerald-500/20 text-emerald-300 px-1.5 py-0.5 rounded-full">
-              {resumeData.personalInfo.name || '求职者'}
+              {resumeData?.personalInfo?.name || '求职者'}
             </span>
           </button>
 
@@ -1189,33 +1196,33 @@ export const ImportResumeDialog: React.FC<ImportResumeDialogProps> = ({ open, on
                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
                       <div className="bg-slate-900/80 p-2 rounded-lg border border-slate-700/50">
                         <span className="text-[10px] text-slate-400 block mb-0.5">👤 候选人 / 意向</span>
-                        <span className="font-semibold text-slate-100 truncate block">{resumeData.personalInfo.name || '求职者'} · {resumeData.jobIntent || '软件工程师'}</span>
+                        <span className="font-semibold text-slate-100 truncate block">{resumeData?.personalInfo?.name || '求职者'} · {resumeData?.jobIntent || '软件工程师'}</span>
                       </div>
                       <div className="bg-slate-900/80 p-2 rounded-lg border border-slate-700/50">
                         <span className="text-[10px] text-slate-400 block mb-0.5">📞 联系电话 / 城市</span>
-                        <span className="font-semibold text-slate-100 truncate block">{resumeData.personalInfo.phone || '暂无'} · {resumeData.personalInfo.location || '深圳'}</span>
+                        <span className="font-semibold text-slate-100 truncate block">{resumeData?.personalInfo?.phone || '暂无'} · {resumeData?.personalInfo?.location || '深圳'}</span>
                       </div>
                       <div className="bg-slate-900/80 p-2 rounded-lg border border-slate-700/50">
                         <span className="text-[10px] text-slate-400 block mb-0.5">🎓 最高教育背景</span>
-                        <span className="font-semibold text-slate-100 truncate block">{resumeData.education.school || '院校'} ({resumeData.education.degree || '本科'})</span>
+                        <span className="font-semibold text-slate-100 truncate block">{resumeData?.education?.school || '院校'} ({resumeData?.education?.degree || '本科'})</span>
                       </div>
                       <div className="bg-slate-900/80 p-2 rounded-lg border border-slate-700/50">
                         <span className="text-[10px] text-slate-400 block mb-0.5">💼 经历与技能统计</span>
-                        <span className="font-semibold text-emerald-400">{resumeData.workExperience.length + resumeData.projectExperience.length} 段经历 · {resumeData.coreSkills.length} 项技能</span>
+                        <span className="font-semibold text-emerald-400">{(resumeData?.workExperience?.length || 0) + (resumeData?.projectExperience?.length || 0)} 段经历 · {resumeData?.coreSkills?.length || 0} 项技能</span>
                       </div>
                     </div>
 
                     {/* Experience Summary */}
-                    {(resumeData.workExperience.length > 0 || resumeData.projectExperience.length > 0) && (
+                    {((resumeData?.workExperience?.length || 0) > 0 || (resumeData?.projectExperience?.length || 0) > 0) && (
                       <div className="space-y-1">
                         <span className="text-[11px] font-semibold text-slate-300">💼 提取到的经历模块：</span>
                         <div className="space-y-1">
-                          {[...resumeData.workExperience, ...resumeData.projectExperience].slice(0, 3).map((exp, idx) => {
+                          {[...(resumeData?.workExperience || []), ...(resumeData?.projectExperience || [])].slice(0, 3).map((exp, idx) => {
                             const expName = 'company' in exp ? exp.company : exp.name;
                             return (
                               <div key={idx} className="text-xs bg-slate-900/60 px-2.5 py-1 rounded border border-slate-800 flex items-center justify-between text-slate-300">
                                 <span className="font-medium text-slate-200">{expName} · <span className="text-blue-400">{exp.role}</span></span>
-                                <span className="text-[10px] text-slate-400">{exp.period} ({exp.bullets.length} 条业绩要点)</span>
+                                <span className="text-[10px] text-slate-400">{exp.period} ({exp.bullets?.length || 0} 条业绩要点)</span>
                               </div>
                             );
                           })}
@@ -1224,7 +1231,7 @@ export const ImportResumeDialog: React.FC<ImportResumeDialogProps> = ({ open, on
                     )}
 
                     {/* Skill Tags */}
-                    {resumeData.coreSkills.length > 0 && (
+                    {(resumeData?.coreSkills?.length || 0) > 0 && (
                       <div className="space-y-1">
                         <span className="text-[11px] font-semibold text-slate-300">⚡ 提取到的核心技能标签：</span>
                         <div className="flex flex-wrap gap-1">

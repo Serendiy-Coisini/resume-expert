@@ -3,10 +3,12 @@ import { sanitizeRichText } from '@/lib/safe-html';
 import type { IWidget } from '@/types/lego';
 import { User, Image as ImageIcon, Smile, Mail, MapPin, Phone, Github, Linkedin, Camera, Star } from 'lucide-react';
 
-export function renderFormattedText(text: string) {
-  if (!text) return null;
+export function renderFormattedText(text: unknown) {
+  if (text === null || text === undefined) return null;
+  const str = typeof text === 'string' ? text : String(text);
+  if (!str) return null;
 
-  const cleaned = text.replace(/\*{4,}/g, '').replace(/\*\*\*\*/g, '');
+  const cleaned = str.replace(/\*{4,}/g, '').replace(/\*\*\*\*/g, '');
 
   const html = cleaned
     .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
@@ -50,6 +52,9 @@ export const WidgetRenderer: React.FC<WidgetRendererProps> = ({ widget }) => {
     borderWidth: css.borderWidth !== undefined ? `${css.borderWidth}px` : '0px',
     borderRadius: typeof css.borderRadius === 'number' ? `${css.borderRadius}px` : css.borderRadius || undefined,
     opacity: css.opacity,
+    textDecoration: (css.textDecoration as React.CSSProperties['textDecoration']) || undefined,
+    textShadow: (css.textShadow as string) || undefined,
+    boxShadow: (css.boxShadow as string) || undefined,
     whiteSpace: 'pre-wrap',
     wordBreak: 'break-word',
     display: 'flex',
@@ -141,13 +146,24 @@ export const WidgetRenderer: React.FC<WidgetRendererProps> = ({ widget }) => {
   }
 
   if (componentName === 'hj-li') {
-    const list = (dataSource.list as string[]) || ['项目一'];
+    const list = Array.isArray(dataSource.list) ? dataSource.list : ['项目一'];
     return (
       <div style={{ ...style, flexDirection: 'column', alignItems: 'flex-start', justifyContent: 'flex-start' }}>
         <ul className="list-disc pl-5 m-0 p-0" style={{ paddingLeft: '20px' }}>
-          {list.map((item, idx) => (
-            <li key={idx}>{renderFormattedText(item)}</li>
-          ))}
+          {list.map((item, idx) => {
+            const itemText = typeof item === 'string'
+              ? item
+              : item && typeof item === 'object'
+              ? [
+                  (item as Record<string, unknown>).title,
+                  (item as Record<string, unknown>).subtitle,
+                  (item as Record<string, unknown>).date,
+                  (item as Record<string, unknown>).desc,
+                  (item as Record<string, unknown>).text
+                ].filter(Boolean).map(String).join(' ') || JSON.stringify(item)
+              : String(item ?? '');
+            return <li key={idx}>{renderFormattedText(itemText)}</li>;
+          })}
         </ul>
       </div>
     );

@@ -128,11 +128,23 @@ export function sanitizePrintHTML(html: string): string {
   });
 
   return sanitizeHtml(preCleaned, {
-    allowedTags: [...sanitizeHtml.defaults.allowedTags, "html", "head", "body", "title", "style", "img"],
+    allowedTags: [
+      ...sanitizeHtml.defaults.allowedTags,
+      "html", "head", "body", "title", "style", "img",
+      "svg", "g", "path", "circle", "rect", "line", "polyline", "polygon"
+    ],
     allowedAttributes: {
       "*": ["class", "style", "id", "lang", "dir"],
       img: ["src", "alt", "width", "height"],
       td: ["colspan", "rowspan"], th: ["colspan", "rowspan"],
+      svg: ["xmlns", "viewbox", "viewBox", "width", "height", "fill", "stroke", "stroke-width", "stroke-linecap", "stroke-linejoin"],
+      path: ["d", "fill", "stroke", "stroke-width", "stroke-linecap", "stroke-linejoin"],
+      circle: ["cx", "cy", "r", "fill", "stroke", "stroke-width"],
+      rect: ["x", "y", "width", "height", "rx", "ry", "fill", "stroke", "stroke-width"],
+      line: ["x1", "y1", "x2", "y2", "stroke", "stroke-width", "stroke-linecap"],
+      polyline: ["points", "fill", "stroke", "stroke-width", "stroke-linecap", "stroke-linejoin"],
+      polygon: ["points", "fill", "stroke", "stroke-width"],
+      g: ["fill", "stroke"]
     },
     transformTags: {
       "*": (tagName, attribs) => {

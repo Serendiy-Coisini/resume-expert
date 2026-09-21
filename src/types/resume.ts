@@ -159,6 +159,8 @@ export interface FinalResume {
   };
 }
 
+export type Resume = FinalResume;
+
 export interface InterviewQuestion {
   question: string;
   suggestedAnswer: string;
