@@ -1,5 +1,6 @@
 import { sanitizePrintHTML } from '@/lib/safe-html';
 import { calculateA4PageHeight } from '@/lib/lego-adapter';
+import { MAX_LEGO_CANVAS_WIDTH, MAX_LEGO_PRINT_PAGES } from '@/lib/lego-limits';
 
 export interface PrintSliceInfo {
   canvasWidth: number;
@@ -15,10 +16,16 @@ export interface PrintSliceInfo {
  * For custom widths, sliceHeight scales proportionally to match A4 paper height when scaled to 210mm.
  */
 export function calculatePrintSlices(canvasWidth: number, canvasHeight: number): PrintSliceInfo {
+  if (!Number.isFinite(canvasWidth) || !Number.isFinite(canvasHeight) || canvasWidth > MAX_LEGO_CANVAS_WIDTH) {
+    throw new Error('画布尺寸无效或超出打印限制');
+  }
   const safeWidth = Math.max(100, Math.round(canvasWidth || 820));
   const sliceHeight = calculateA4PageHeight(safeWidth);
   const safeHeight = Math.max(sliceHeight, Math.round(canvasHeight || sliceHeight));
   const pageSlices = Math.max(1, Math.ceil(safeHeight / sliceHeight));
+  if (pageSlices > MAX_LEGO_PRINT_PAGES) {
+    throw new Error(`打印页数超出限制（最多 ${MAX_LEGO_PRINT_PAGES} 页）`);
+  }
 
   const offsets: number[] = [];
   for (let s = 0; s < pageSlices; s++) {
@@ -44,6 +51,7 @@ export function generateLegoPrintHtml(pageElements: HTMLElement[], localStyles: 
   // Build multi-page HTML slices across all canvas pages
   const pagesHtml: string[] = [];
   const totalPageCount = pageElements.length;
+  let totalSlices = 0;
 
   pageElements.forEach((pageElement, pIdx) => {
     // Read pagePadding from the canvas page element's data attribute
@@ -86,6 +94,10 @@ export function generateLegoPrintHtml(pageElements: HTMLElement[], localStyles: 
     const rawHeight = parseFloat(pageElement.style.height || '') || pageElement.offsetHeight || 1160;
     const sliceInfo = calculatePrintSlices(rawWidth, rawHeight);
     const { canvasWidth, canvasHeight, pageSlices, offsets } = sliceInfo;
+    totalSlices += pageSlices;
+    if (totalSlices > MAX_LEGO_PRINT_PAGES) {
+      throw new Error(`打印页数超出限制（最多 ${MAX_LEGO_PRINT_PAGES} 页）`);
+    }
     const canvasBg = pageElement.style.backgroundColor || '#ffffff';
 
     for (let s = 0; s < pageSlices; s++) {
@@ -315,8 +327,14 @@ export function printLegoCanvas() {
     }
   });
 
-  const rawHtml = generateLegoPrintHtml(pageElements, localStyles);
-  const cleanHtml = sanitizePrintHTML(rawHtml);
+  let cleanHtml: string;
+  try {
+    cleanHtml = sanitizePrintHTML(generateLegoPrintHtml(pageElements, localStyles));
+  } catch (error) {
+    iframe.remove();
+    alert(error instanceof Error ? error.message : '打印任务创建失败');
+    return;
+  }
 
   doc.open();
   doc.write(cleanHtml);

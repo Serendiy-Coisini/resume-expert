@@ -11,6 +11,7 @@ import { renderPdfPagesToImages } from '@/lib/pdf-to-images';
 import { getAIHeaders } from '@/store/ai-config-store';
 import { buildLegoSchemaFromResume, fillAiDataIntoExistingSchema } from '@/lib/lego-adapter';
 import { validateAndNormalizeStructuredResume } from '@/lib/schema-normalizer';
+import { approveExternalLegoImageSource, isExternalLegoImageSource, safeLegoImageSource, validateLocalLegoImage } from '@/lib/lego-image';
 import type { FinalResume, AnalysisResult, TemplateId, WorkExperience, ProjectExperience } from '@/types/resume';
 import {
   X,
@@ -517,10 +518,8 @@ export const ImportResumeDialog: React.FC<ImportResumeDialogProps> = ({ open, on
   const handleAvatarFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    if (!file.type.startsWith('image/')) {
-      showToast('error', '请选择有效的图片文件 (JPG / PNG / WebP)');
-      return;
-    }
+    const imageError = validateLocalLegoImage(file);
+    if (imageError) { showToast('error', imageError); e.target.value = ''; return; }
 
     const reader = new FileReader();
     reader.onload = () => {
@@ -1268,9 +1267,9 @@ export const ImportResumeDialog: React.FC<ImportResumeDialogProps> = ({ open, on
                 />
                 <div className="flex items-center gap-4 bg-slate-900/80 p-3 rounded-lg border border-slate-700/60 mb-2">
                   <div className="relative w-14 h-14 rounded-full bg-slate-800 border-2 border-slate-600 overflow-hidden shrink-0 flex items-center justify-center">
-                    {resumeData.personalInfo.avatarUrl ? (
+                    {safeLegoImageSource(resumeData.personalInfo.avatarUrl) ? (
                       <img
-                        src={resumeData.personalInfo.avatarUrl}
+                        src={safeLegoImageSource(resumeData.personalInfo.avatarUrl)}
                         alt="Avatar"
                         className="w-full h-full object-cover"
                       />
@@ -1353,7 +1352,7 @@ export const ImportResumeDialog: React.FC<ImportResumeDialogProps> = ({ open, on
                     />
                   </div>
                   <div>
-                    <label className="text-[11px] text-slate-400 block mb-1 font-medium">头像 URL 地址 (可选)</label>
+                    <label className="text-[11px] text-slate-400 block mb-1 font-medium">头像 HTTPS 地址 (可选)</label>
                     <input
                       type="text"
                       value={resumeData.personalInfo.avatarUrl || ''}
@@ -1361,6 +1360,15 @@ export const ImportResumeDialog: React.FC<ImportResumeDialogProps> = ({ open, on
                       placeholder="https://..."
                       className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-slate-100 focus:outline-none focus:border-blue-500"
                     />
+                    {isExternalLegoImageSource(resumeData.personalInfo.avatarUrl) && !safeLegoImageSource(resumeData.personalInfo.avatarUrl) && (
+                      <button type="button" className="mt-1 text-[11px] text-amber-300 underline" onClick={() => {
+                        if (approveExternalLegoImageSource(resumeData.personalInfo.avatarUrl || '')) {
+                          setResumeData((current) => ({ ...current }));
+                        } else {
+                          showToast('error', '仅支持 HTTPS 外部图片地址');
+                        }
+                      }}>允许加载此图片（会向图片网站发起请求）</button>
+                    )}
                   </div>
                 </div>
               </div>

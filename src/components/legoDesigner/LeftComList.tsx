@@ -4,6 +4,7 @@ import { useLegoDesignerStore } from '@/store/lego-designer-store';
 import { useResumeStore } from '@/store/resume-store';
 import { RESUME_MODEL_DATA } from '@/lib/resume-model-data';
 import { SaveTemplateDialog } from './SaveTemplateDialog';
+import { approveExternalLegoImageSource, isExternalLegoImageSource, safeLegoImageSource } from '@/lib/lego-image';
 import {
   LayoutGrid,
   Layers,
@@ -716,7 +717,11 @@ export const LeftComList: React.FC<LeftComListProps> = ({
             onSaveTemplate={() => setSaveDialogOpen(true)}
             onLoadTemplate={(id) => {
               if (confirm('确定要载入此模板吗？当前画布中的内容将被替换。')) {
-                loadSavedTemplate(id);
+                try {
+                  loadSavedTemplate(id);
+                } catch (error) {
+                  alert(error instanceof Error ? `模板载入失败：${error.message}` : '模板载入失败，请检查备份文件');
+                }
               }
             }}
             onDeleteTemplate={(id) => {
@@ -728,7 +733,7 @@ export const LeftComList: React.FC<LeftComListProps> = ({
         )}
       </div>
 
-      <SaveTemplateDialog open={saveDialogOpen} onClose={() => setSaveDialogOpen(false)} />
+      {saveDialogOpen && <SaveTemplateDialog open onClose={() => setSaveDialogOpen(false)} />}
     </div>
   );
 };
@@ -751,6 +756,7 @@ const TemplatesPanel: React.FC<TemplatesPanelProps> = ({
   onLoadTemplate,
   onDeleteTemplate
 }) => {
+  const [, refreshApprovedCovers] = useState(0);
   const categories = useMemo(() => {
     const cats = new Set<string>();
     savedTemplates.forEach(t => {
@@ -812,9 +818,9 @@ const TemplatesPanel: React.FC<TemplatesPanelProps> = ({
             >
               {/* Cover */}
               <div className="relative h-28 bg-slate-50 overflow-hidden">
-                {tpl.cover ? (
+                {safeLegoImageSource(tpl.cover) ? (
                   <img
-                    src={tpl.cover}
+                    src={safeLegoImageSource(tpl.cover)}
                     alt={tpl.name}
                     className="w-full h-full object-cover object-top"
                   />
@@ -822,6 +828,12 @@ const TemplatesPanel: React.FC<TemplatesPanelProps> = ({
                   <div className="w-full h-full flex flex-col items-center justify-center">
                     <FolderOpen className="w-8 h-8 text-slate-300" />
                     <span className="text-[10px] text-slate-400 mt-1">{tpl.name}</span>
+                    {isExternalLegoImageSource(tpl.cover) && (
+                      <button type="button" className="text-[10px] text-blue-600 underline mt-1" onClick={() => {
+                        if (approveExternalLegoImageSource(tpl.cover)) refreshApprovedCovers((current) => current + 1);
+                        else alert('仅支持 HTTPS 封面地址');
+                      }}>允许加载外部封面</button>
+                    )}
                   </div>
                 )}
 

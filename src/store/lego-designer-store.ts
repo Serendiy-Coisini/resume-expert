@@ -2,6 +2,8 @@ import { create } from 'zustand';
 import type { IHJSchema, IWidget, IWidgetCss, IWidgetDataSource } from '@/types/lego';
 import { normalizeLegoSchema } from '@/lib/schema-normalizer';
 import { getResumeSourceKey } from '@/store/resume-store';
+import { appendBlankPage, moveWidgetsToCanvasPage, type PageMovePosition } from '@/lib/lego-pages';
+import { calculateA4PageHeight } from '@/lib/lego-adapter';
 
 const TEMPLATES_STORAGE_KEY = 'LEGO_MY_TEMPLATES';
 
@@ -83,11 +85,12 @@ export const loadTemplatesFromStorage = (): SavedTemplate[] => {
     if (raw) {
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed)) {
-        return parsed.map((item) => {
+        return parsed.filter((item) => item && typeof item === 'object' &&
+          (item.schema || item.template_json)).map((item) => {
           const id = item.id || item._id || `tpl-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
           const name = item.name || item.title || '自定义模板';
           const cover = item.cover || item.previewUrl || '';
-          const schema = item.schema || item.template_json || deepClone(DEFAULT_LEGO_SCHEMA);
+          const schema = item.schema || item.template_json;
           return {
             id,
             _id: id,
@@ -158,7 +161,7 @@ interface LegoDesignerState {
   // Actions
   pushHistoryState: () => void;
   commitHistorySnapshot: (previousSchema: IHJSchema) => void;
-  setSchema: (schema: IHJSchema | Record<string, unknown> | unknown, saveHistory?: boolean) => void;
+  setSchema: (schema: IHJSchema | Record<string, unknown> | unknown, saveHistory?: boolean, preserveSelection?: boolean) => void;
   setSelectedWidgetId: (id: string | null) => void;
   setSelectedWidgetIds: (ids: string[]) => void;
   toggleWidgetSelection: (id: string, isMulti?: boolean) => void;
@@ -188,6 +191,7 @@ interface LegoDesignerState {
   
   addPage: () => void;
   deletePage: (pageIndex: number) => void;
+  moveWidgetsToPage: (widgetIds: string[], targetPageIndex: number, primaryId: string, position: PageMovePosition, initialPositions: Record<string, PageMovePosition>, previousSchema: IHJSchema) => boolean;
 
   undo: () => void;
   redo: () => void;
@@ -242,16 +246,23 @@ export const useLegoDesignerStore = create<LegoDesignerState>((set, get) => {
       set({ undoStack: newUndo, redoStack: [] });
     },
 
-    setSchema: (newSchema, saveHistory = true) => {
+    setSchema: (newSchema, saveHistory = true, preserveSelection = !saveHistory) => {
       const normalized = normalizeLegoSchema(newSchema);
       set((state) => {
-        const historyUpdate = state.sourceKey !== getResumeSourceKey() ? { undoStack: [], redoStack: [] } : saveHistory ? saveStateToHistory(state.schema) : {};
+        const sameSource = state.sourceKey === getResumeSourceKey();
+        const historyUpdate = !sameSource ? { undoStack: [], redoStack: [] } : saveHistory ? saveStateToHistory(state.schema) : {};
+        const validIds = new Set(normalized.componentsTree.flatMap((page) => page.children.map((widget) => widget.id)));
+        const selectedWidgetIds = preserveSelection && sameSource
+          ? state.selectedWidgetIds.filter((id) => validIds.has(id))
+          : [];
         return {
           schema: normalized,
-          pageActiveIndex: 0,
+          pageActiveIndex: preserveSelection && sameSource
+            ? Math.min(state.pageActiveIndex, normalized.componentsTree.length - 1)
+            : 0,
           sourceKey: getResumeSourceKey(),
-          selectedWidgetId: null,
-          selectedWidgetIds: [],
+          selectedWidgetId: selectedWidgetIds.at(-1) || null,
+          selectedWidgetIds,
           ...historyUpdate
         };
       });
@@ -458,6 +469,7 @@ export const useLegoDesignerStore = create<LegoDesignerState>((set, get) => {
             if (!targets.has(widget.id) || !initPos) return widget;
             return {
               ...widget,
+              customProps: { ...widget.customProps, __legoTextLayout: undefined },
               css: {
                 ...widget.css,
                 left: Math.max(0, Math.round(initPos.left + deltaX)),
@@ -592,7 +604,13 @@ export const useLegoDesignerStore = create<LegoDesignerState>((set, get) => {
             ...page,
             children: page.children.map((widget) =>
               widget.id === widgetId
-                ? { ...widget, css: { ...widget.css, ...cssUpdate } }
+                ? {
+                    ...widget,
+                    css: { ...widget.css, ...cssUpdate },
+                    customProps: cssUpdate.top !== undefined || cssUpdate.height !== undefined
+                      ? { ...widget.customProps, __legoTextLayout: undefined }
+                      : widget.customProps,
+                  }
                 : widget
             ),
           };
@@ -613,6 +631,9 @@ export const useLegoDesignerStore = create<LegoDesignerState>((set, get) => {
         for (const widget of page.children) {
           if (widgetIds.includes(widget.id)) {
             widget.css = { ...widget.css, ...cssUpdate };
+            if (cssUpdate.top !== undefined || cssUpdate.height !== undefined) {
+              widget.customProps = { ...widget.customProps, __legoTextLayout: undefined };
+            }
           }
         }
       }
@@ -722,16 +743,20 @@ export const useLegoDesignerStore = create<LegoDesignerState>((set, get) => {
 
     updateWidgetDataSource: (widgetId, dataUpdate, saveHistory = true) => {
       const { schema } = get();
+      const currentWidget = schema.componentsTree.flatMap((page) => page.children).find((widget) => widget.id === widgetId);
+      if (!currentWidget || Object.entries(dataUpdate).every(([key, value]) => currentWidget.dataSource[key] === value)) return;
       const historyUpdate = saveHistory ? saveStateToHistory(schema) : {};
-      const newSchema = deepClone(schema);
-
-      for (const page of newSchema.componentsTree) {
-        const widget = page.children?.find((item) => item.id === widgetId);
-        if (widget) {
-          widget.dataSource = { ...widget.dataSource, ...dataUpdate };
-          break;
-        }
-      }
+      const newSchema = {
+        ...schema,
+        componentsTree: schema.componentsTree.map((page) => page.children.some((widget) => widget.id === widgetId)
+          ? {
+              ...page,
+              children: page.children.map((widget) => widget.id === widgetId
+                ? { ...widget, dataSource: { ...widget.dataSource, ...dataUpdate } }
+                : widget),
+            }
+          : page),
+      };
 
       set({ schema: newSchema, ...historyUpdate });
     },
@@ -757,7 +782,8 @@ export const useLegoDesignerStore = create<LegoDesignerState>((set, get) => {
       }
 
       let lastId = '';
-      let maxBottom = Number(newSchema.css.height) || 1160;
+      const targetPage = newSchema.componentsTree[targetPageIndex];
+      let maxBottom = Number(targetPage.height || newSchema.css.height) || 1160;
 
       widgets.forEach((widget, index) => {
         const newWidget = deepClone(widget);
@@ -774,7 +800,12 @@ export const useLegoDesignerStore = create<LegoDesignerState>((set, get) => {
         newSchema.componentsTree[targetPageIndex].children.push(newWidget);
       });
 
-      newSchema.css.height = maxBottom;
+      if (targetPage.height !== undefined) {
+        const a4Height = calculateA4PageHeight(newSchema.css.width);
+        targetPage.height = Math.ceil(maxBottom / a4Height) * a4Height;
+      } else {
+        newSchema.css.height = maxBottom;
+      }
 
       set({
         schema: newSchema,
@@ -889,15 +920,8 @@ export const useLegoDesignerStore = create<LegoDesignerState>((set, get) => {
 
     addPage: () => {
       const { schema } = get();
+      const newSchema = appendBlankPage(schema);
       const historyUpdate = saveStateToHistory(schema);
-      const newSchema = deepClone(schema);
-
-      newSchema.componentsTree.push({
-        id: `page-${Date.now()}`,
-        componentName: 'page',
-        commentType: 'page',
-        children: []
-      });
 
       set({
         schema: newSchema,
@@ -906,9 +930,26 @@ export const useLegoDesignerStore = create<LegoDesignerState>((set, get) => {
       });
     },
 
+    moveWidgetsToPage: (widgetIds, targetPageIndex, primaryId, position, initialPositions, previousSchema) => {
+      const { schema } = get();
+      const movedSchema = moveWidgetsToCanvasPage(schema, widgetIds, targetPageIndex, primaryId, position, initialPositions);
+      if (movedSchema === schema) return false;
+      const normalized = normalizeLegoSchema(movedSchema);
+      const historyUpdate = saveStateToHistory(previousSchema);
+      const movedIds = widgetIds.filter((id) => normalized.componentsTree[targetPageIndex].children.some((widget) => widget.id === id));
+      set({
+        schema: normalized,
+        pageActiveIndex: targetPageIndex,
+        selectedWidgetIds: movedIds,
+        selectedWidgetId: movedIds.at(-1) || null,
+        ...historyUpdate,
+      });
+      return true;
+    },
+
     deletePage: (pageIndex) => {
       const { schema, pageActiveIndex, selectedWidgetIds } = get();
-      if (schema.componentsTree.length <= 1) return; // Keep at least 1 page
+      if (schema.componentsTree.length <= 1 || pageIndex < 0 || pageIndex >= schema.componentsTree.length) return; // Keep at least 1 page
 
       const historyUpdate = saveStateToHistory(schema);
       const newSchema = deepClone(schema);
@@ -946,6 +987,7 @@ export const useLegoDesignerStore = create<LegoDesignerState>((set, get) => {
 
       set({
         schema: targetSchema,
+        pageActiveIndex: Math.min(get().pageActiveIndex, targetSchema.componentsTree.length - 1),
         undoStack: newUndo,
         redoStack: newRedo,
         selectedWidgetIds: remainingIds,
@@ -970,6 +1012,7 @@ export const useLegoDesignerStore = create<LegoDesignerState>((set, get) => {
 
       set({
         schema: targetSchema,
+        pageActiveIndex: Math.min(get().pageActiveIndex, targetSchema.componentsTree.length - 1),
         undoStack: newUndo,
         redoStack: newRedo,
         selectedWidgetIds: remainingIds,
@@ -1041,10 +1084,13 @@ export const useLegoDesignerStore = create<LegoDesignerState>((set, get) => {
       const tpl = savedTemplates.find(t => t.id === id || t._id === id);
       if (!tpl) return;
       const targetSchema = tpl.schema || tpl.template_json;
-      if (!targetSchema) return;
+      if (!targetSchema || typeof targetSchema !== 'object' || !Array.isArray(targetSchema.componentsTree)) {
+        throw new Error('模板数据不完整，请从 JSON 备份重新导入');
+      }
+      const normalized = normalizeLegoSchema(targetSchema);
       const historyUpdate = get().sourceKey !== getResumeSourceKey() ? { undoStack: [], redoStack: [] } : saveStateToHistory(schema);
       set({
-        schema: deepClone(normalizeLegoSchema(targetSchema)),
+        schema: deepClone(normalized),
         sourceKey: getResumeSourceKey(),
         selectedWidgetId: null,
         selectedWidgetIds: [],

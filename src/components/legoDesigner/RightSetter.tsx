@@ -6,6 +6,7 @@ import { useResumeStore } from '@/store/resume-store';
 import { PhotoManagerDialog } from './PhotoManagerDialog';
 import { applyThemeColorToSchema, THEME_COLOR_PRESETS, hslToHex, hexToHsl } from '@/lib/theme-utils';
 import { calculateTagWidth } from '@/lib/lego-adapter';
+import { safeLegoImageSource, validateLocalLegoImage } from '@/lib/lego-image';
 import type { IHJSchema } from '@/types/lego';
 import {
   AlignLeft,
@@ -35,7 +36,7 @@ import {
 
 interface RightSetterThemeSectionProps {
   schema: IHJSchema;
-  setSchema: (schema: IHJSchema, saveHistory?: boolean) => void;
+  setSchema: (schema: IHJSchema, saveHistory?: boolean, preserveSelection?: boolean) => void;
   currentThemeColor: string;
   setTemplateOptions: (opts: { themeColor?: string; [key: string]: unknown }) => void;
   commitHistorySnapshot: (previousSchema: IHJSchema) => void;
@@ -276,6 +277,7 @@ export const RightSetter: React.FC<RightSetterProps> = ({
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const editorRef = useRef<HTMLDivElement | null>(null);
+  const textEditStartRef = useRef<IHJSchema | null>(null);
   const savedSelectionRangeRef = useRef<Range | null>(null);
   const [selectedCustomColor, setSelectedCustomColor] = useState('#2563eb');
 
@@ -316,7 +318,7 @@ export const RightSetter: React.FC<RightSetterProps> = ({
       updateWidgetDataSource(selectedWidgetId, {
         text: updatedHtml,
         workContent: updatedHtml
-      });
+      }, false);
     }
   };
 
@@ -334,6 +336,8 @@ export const RightSetter: React.FC<RightSetterProps> = ({
   const handleAvatarFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !selectedWidgetId) return;
+    const imageError = validateLocalLegoImage(file);
+    if (imageError) { alert(imageError); e.target.value = ''; return; }
 
     const reader = new FileReader();
     reader.onload = (event) => {
@@ -364,6 +368,8 @@ export const RightSetter: React.FC<RightSetterProps> = ({
   const handleQrFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !selectedWidgetId) return;
+    const imageError = validateLocalLegoImage(file);
+    if (imageError) { alert(imageError); e.target.value = ''; return; }
 
     const reader = new FileReader();
     reader.onload = (event) => {
@@ -403,7 +409,7 @@ export const RightSetter: React.FC<RightSetterProps> = ({
       }
     }
     if (changed) {
-      setSchema(newSchema, true);
+      setSchema(newSchema, true, true);
     }
   };
 
@@ -625,7 +631,7 @@ export const RightSetter: React.FC<RightSetterProps> = ({
     const existingAvatar = schema?.componentsTree?.[0]?.children?.find(
       (w) => w.componentName.startsWith('hj-avatar') || w.id.includes('avatar') || (w.title || '').includes('头像') || (w.title || '').includes('照片')
     );
-    const avatarSrc = (existingAvatar?.dataSource?.avatarSrc as string) || (existingAvatar?.dataSource?.src as string) || '';
+    const avatarSrc = safeLegoImageSource(existingAvatar?.dataSource?.avatarSrc || existingAvatar?.dataSource?.src);
 
     return (
       <div
@@ -741,7 +747,7 @@ export const RightSetter: React.FC<RightSetterProps> = ({
             </div>
           </div>
         </div>
-        <PhotoManagerDialog open={photoDialogOpen} onClose={() => setPhotoDialogOpen(false)} />
+        {photoDialogOpen && <PhotoManagerDialog open onClose={() => setPhotoDialogOpen(false)} />}
       </div>
     );
   }
@@ -753,7 +759,8 @@ export const RightSetter: React.FC<RightSetterProps> = ({
     componentName.includes('avatar') ||
     componentName.includes('image');
 
-  const currentImageSrc = (dataSource.avatarSrc || dataSource.src) as string;
+  const currentImageSrc = safeLegoImageSource(dataSource.avatarSrc || dataSource.src);
+  const currentQrSrc = safeLegoImageSource(dataSource.qrCodeSrc || dataSource.src || dataSource.avatarSrc);
 
   return (
     <div
@@ -917,9 +924,9 @@ export const RightSetter: React.FC<RightSetterProps> = ({
 
             <div className="flex items-center gap-3 pt-1">
               <div className="w-16 h-16 bg-white border border-slate-200 rounded-lg overflow-hidden flex items-center justify-center shrink-0 shadow-inner relative p-1">
-                {(dataSource.qrCodeSrc || dataSource.src || dataSource.avatarSrc) ? (
+                {currentQrSrc ? (
                   <img
-                    src={(dataSource.qrCodeSrc || dataSource.src || dataSource.avatarSrc) as string}
+                    src={currentQrSrc}
                     alt="QR Code"
                     className="w-full h-full object-contain"
                   />
@@ -1242,6 +1249,12 @@ export const RightSetter: React.FC<RightSetterProps> = ({
               ref={editorRef}
               contentEditable
               suppressContentEditableWarning
+              onFocus={() => { textEditStartRef.current = useLegoDesignerStore.getState().schema; }}
+              onBlur={() => {
+                const before = textEditStartRef.current;
+                textEditStartRef.current = null;
+                if (before && before !== useLegoDesignerStore.getState().schema) commitHistorySnapshot(before);
+              }}
               onMouseUp={saveSelection}
               onKeyUp={saveSelection}
               onSelect={saveSelection}
@@ -1251,7 +1264,7 @@ export const RightSetter: React.FC<RightSetterProps> = ({
                 updateWidgetDataSource(selectedWidget.id, {
                   text: html,
                   workContent: html
-                });
+                }, false);
               }}
             />
           </div>
@@ -1786,7 +1799,7 @@ export const RightSetter: React.FC<RightSetterProps> = ({
         </div>
       </div>
 
-      <PhotoManagerDialog open={photoDialogOpen} onClose={() => setPhotoDialogOpen(false)} />
+      {photoDialogOpen && <PhotoManagerDialog open onClose={() => setPhotoDialogOpen(false)} />}
     </div>
   );
 };

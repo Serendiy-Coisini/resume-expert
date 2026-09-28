@@ -1,5 +1,7 @@
 import type { IHJSchema, IWidget, IPageComponent, IWidgetCss, IWidgetDataSource } from '@/types/lego';
 import type { FinalResume } from '@/types/resume';
+import { calculateA4PageHeight } from '@/lib/lego-adapter';
+import { MAX_LEGO_CANVAS_WIDTH, MAX_LEGO_PRINT_PAGES, MAX_LEGO_SCHEMA_PAGES } from '@/lib/lego-limits';
 
 function extractValue(val: unknown): string {
   if (val === null || val === undefined) return '';
@@ -619,9 +621,15 @@ export function normalizeLegoSchema(rawJson: unknown): IHJSchema {
   const cssObj = (data.css || {}) as Record<string, unknown>;
   const parsedWidth = parseInt(String(cssObj.width));
   const safeWidth = typeof cssObj.width === 'number' && cssObj.width >= 300 ? cssObj.width : (!isNaN(parsedWidth) && parsedWidth >= 300 ? parsedWidth : 820);
+  if (!Number.isFinite(safeWidth) || safeWidth > MAX_LEGO_CANVAS_WIDTH) {
+    throw new Error(`画布宽度超出限制（最多 ${MAX_LEGO_CANVAS_WIDTH}px）`);
+  }
 
   const parsedHeight = parseInt(String(cssObj.height));
   const safeHeight = typeof cssObj.height === 'number' && cssObj.height >= 500 ? cssObj.height : (!isNaN(parsedHeight) && parsedHeight >= 500 ? parsedHeight : 1160);
+  if (!Number.isFinite(safeHeight)) {
+    throw new Error('画布高度必须是有限数字');
+  }
 
   const background = (cssObj.background as string) || (cssObj.backgroundColor as string) || '#ffffff';
 
@@ -663,19 +671,32 @@ export function normalizeLegoSchema(rawJson: unknown): IHJSchema {
     );
 
     if (hasPages) {
-      if (data.componentsTree.length > 20) {
-        throw new Error(`积木数据超出最大允许页数限制（最多支持 20 页，当前包含 ${data.componentsTree.length} 页）`);
+      if (data.componentsTree.length > MAX_LEGO_SCHEMA_PAGES) {
+        throw new Error(`积木数据超出最大允许页数限制（最多支持 ${MAX_LEGO_SCHEMA_PAGES} 页，当前包含 ${data.componentsTree.length} 页）`);
       }
+      const pageIds = new Set<string>();
       pages = data.componentsTree.map((pageItem: unknown, pIdx: number) => {
         const pObj = (pageItem || {}) as Record<string, unknown>;
         const childrenList = Array.isArray(pObj.children) ? pObj.children : [];
         if (childrenList.length > 500) {
           throw new Error(`第 ${pIdx + 1} 页组件数量超出限制（单页最多支持 500 个组件，当前包含 ${childrenList.length} 个）`);
         }
+        const requestedId = typeof pObj.id === 'string' && pObj.id.trim() ? pObj.id.trim() : `page-${pIdx + 1}`;
+        let pageId = requestedId;
+        let suffix = 2;
+        while (pageIds.has(pageId)) pageId = `${requestedId}-${suffix++}`;
+        pageIds.add(pageId);
+        const pageHeight = typeof pObj.height === 'number' && Number.isFinite(pObj.height)
+          ? Math.max(calculateA4PageHeight(safeWidth), pObj.height)
+          : undefined;
         return {
-          id: (pObj.id as string) || `page-${pIdx + 1}`,
+          id: pageId,
           componentName: 'page',
           commentType: 'page',
+          height: pageHeight,
+          autoLayoutBaseHeight: pageHeight !== undefined && typeof pObj.autoLayoutBaseHeight === 'number' && Number.isFinite(pObj.autoLayoutBaseHeight)
+            ? Math.min(pageHeight, Math.max(calculateA4PageHeight(safeWidth), pObj.autoLayoutBaseHeight))
+            : undefined,
           children: childrenList.map((w: unknown, wIdx: number) =>
             ensureValidWidget(w as Record<string, unknown>, wIdx, seenIds)
           )
@@ -776,16 +797,28 @@ export function normalizeLegoSchema(rawJson: unknown): IHJSchema {
   // Ensure canvas height expands to fit all widgets cleanly without uncontrolled drift
   let maxWidgetBottom = 0;
   pages.forEach((page) => {
+    let pageBottom = 0;
     (page.children || []).forEach((w) => {
       const b = (w.css?.top || 0) + (w.css?.height || 40);
-      if (b > maxWidgetBottom) maxWidgetBottom = b;
+      if (b > pageBottom) pageBottom = b;
     });
+    if (page.height !== undefined) {
+      if (pageBottom > page.height) page.height = Math.ceil((pageBottom + 40) / calculateA4PageHeight(safeWidth)) * calculateA4PageHeight(safeWidth);
+    } else if (pageBottom > maxWidgetBottom) {
+      maxWidgetBottom = pageBottom;
+    }
   });
 
   if (maxWidgetBottom > safeHeight) {
     safeCss.height = Math.max(safeHeight, maxWidgetBottom + 40);
   } else {
     safeCss.height = safeHeight;
+  }
+  const a4PageHeight = calculateA4PageHeight(safeWidth);
+  const totalPrintPages = pages.reduce((total, page) =>
+    total + Math.ceil((page.height || safeCss.height) / a4PageHeight), 0);
+  if (totalPrintPages > MAX_LEGO_PRINT_PAGES) {
+    throw new Error(`画布总页数超出限制（最多 ${MAX_LEGO_PRINT_PAGES} 页）`);
   }
 
   return {

@@ -1,5 +1,3 @@
-"use client";
-
 import Link from "next/link";
 import { Sparkles, Brain, LayoutGrid, ShieldCheck, Zap, Settings } from "lucide-react";
 import { Button } from "@/components/ui/button";

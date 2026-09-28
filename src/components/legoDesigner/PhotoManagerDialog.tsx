@@ -3,6 +3,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { useLegoDesignerStore } from '@/store/lego-designer-store';
 import { useResumeStore } from '@/store/resume-store';
 import type { IWidget } from '@/types/lego';
+import { approveExternalLegoImageSource, isExternalLegoImageSource, safeLegoImageSource, validateLocalLegoImage } from '@/lib/lego-image';
 import {
   User,
   Upload,
@@ -44,6 +45,7 @@ export const PhotoManagerDialog: React.FC<PhotoManagerDialogProps> = ({ open, on
     '';
 
   const [avatarSrc, setAvatarSrc] = useState<string>(initialAvatarSrc);
+  const [, refreshApprovedImage] = useState(0);
   const startAvatarUpload = useInputTask(open, avatarSrc);
   const [urlInput, setUrlInput] = useState<string>('');
   const [shape, setShape] = useState<AvatarShape>('rounded');
@@ -123,13 +125,9 @@ export const PhotoManagerDialog: React.FC<PhotoManagerDialogProps> = ({ open, on
     const file = e.target.files?.[0];
     if (!file) return;
 
-    if (!file.type.startsWith('image/')) {
-      alert('请选择有效的图片文件 (PNG, JPG, JPEG, WebP)');
-      return;
-    }
-
-    if (file.size > 8 * 1024 * 1024) {
-      alert('图片大小不能超过 8MB');
+    const imageError = validateLocalLegoImage(file);
+    if (imageError) {
+      alert(imageError);
       return;
     }
 
@@ -195,6 +193,10 @@ export const PhotoManagerDialog: React.FC<PhotoManagerDialogProps> = ({ open, on
   const handleApplyToCanvas = () => {
     if (!avatarSrc) {
       alert('请先上传本地照片或粘贴图片链接');
+      return;
+    }
+    if (!safeLegoImageSource(avatarSrc)) {
+      alert('请先允许加载 HTTPS 图片，或上传本地照片');
       return;
     }
 
@@ -413,9 +415,9 @@ export const PhotoManagerDialog: React.FC<PhotoManagerDialogProps> = ({ open, on
                 }}
                 className="overflow-hidden flex items-center justify-center transition-all duration-200 relative group"
               >
-                {avatarSrc ? (
+                {safeLegoImageSource(avatarSrc) ? (
                   <img
-                    src={avatarSrc}
+                    src={safeLegoImageSource(avatarSrc)}
                     alt="Preview"
                     className="w-full h-full object-cover"
                   />
@@ -490,7 +492,16 @@ export const PhotoManagerDialog: React.FC<PhotoManagerDialogProps> = ({ open, on
                     disabled={!urlInput.trim()}
                     onClick={() => {
                       if (urlInput.trim()) {
-                        setAvatarSrc(urlInput.trim());
+                        const source = urlInput.trim();
+                        if (isExternalLegoImageSource(source) && !approveExternalLegoImageSource(source)) {
+                          alert('仅支持 HTTPS 外部图片地址');
+                          return;
+                        }
+                        if (!safeLegoImageSource(source)) {
+                          alert('图片地址无效，请上传本地图片或使用 HTTPS 地址');
+                          return;
+                        }
+                        setAvatarSrc(source);
                         setUrlInput('');
                       }
                     }}
@@ -499,6 +510,13 @@ export const PhotoManagerDialog: React.FC<PhotoManagerDialogProps> = ({ open, on
                     使用链接
                   </button>
                 </div>
+                {isExternalLegoImageSource(avatarSrc) && !safeLegoImageSource(avatarSrc) && (
+                  <button type="button" className="text-[10px] text-amber-300 underline" onClick={() => {
+                    if (approveExternalLegoImageSource(avatarSrc)) refreshApprovedImage((current) => current + 1);
+                    else alert('仅支持 HTTPS 外部图片地址');
+                  }}>允许加载当前照片</button>
+                )}
+                <p className="text-[10px] text-slate-400">选择“使用链接”或允许加载照片会向图片所在网站发起请求；仅支持 HTTPS。</p>
               </div>
 
               {/* 2. Shape Selector */}

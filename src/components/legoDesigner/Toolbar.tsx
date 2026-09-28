@@ -2,7 +2,7 @@ import React, { useRef, useState, useEffect, useCallback } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { useLegoDesignerStore } from '@/store/lego-designer-store';
 import { useResumeStore } from '@/store/resume-store';
-import { buildLegoSchemaFromResume, fillAiDataIntoExistingSchema, reflowCanvasWidgetsForPagination, hasManualCanvasEdits, extractResumeFromLegoSchema } from '@/lib/lego-adapter';
+import { buildLegoSchemaFromResume, fillAiDataIntoExistingSchema, reflowCanvasWidgetsForPagination, hasManualCanvasEdits, extractResumeFromLegoSchema, calculateA4PageHeight } from '@/lib/lego-adapter';
 import { validateAndNormalizeLegoJson } from '@/lib/schema-normalizer';
 import { printLegoCanvas } from './utils/printLego';
 import { exportResumeAsWord } from '@/lib/utils';
@@ -11,6 +11,7 @@ import { ImportResumeDialog } from './ImportResumeDialog';
 import { PhotoManagerDialog } from './PhotoManagerDialog';
 import { saveLegoDraft, loadLegoDraft } from '@/lib/lego-draft';
 import { applyThemeColorToSchema, THEME_COLOR_PRESETS, hslToHex, hexToHsl } from '@/lib/theme-utils';
+import { canAppendBlankPage } from '@/lib/lego-pages';
 import type { TemplateId } from '@/types/resume';
 import {
   ZoomIn,
@@ -35,7 +36,8 @@ import {
   Save,
   MoreHorizontal,
   ChevronRight,
-  BookmarkPlus
+  BookmarkPlus,
+  FilePlus2
 } from 'lucide-react';
 
 interface ToolbarProps {
@@ -58,6 +60,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({ isFullScreen, onToggleFullScre
     pushHistoryState,
     setSchema,
     resetSchema,
+    addPage,
     schema,
     selectedWidgetId,
     isFormatPainterActive,
@@ -72,6 +75,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({ isFullScreen, onToggleFullScre
     pushHistoryState: s.pushHistoryState,
     setSchema: s.setSchema,
     resetSchema: s.resetSchema,
+    addPage: s.addPage,
     schema: s.schema,
     selectedWidgetId: s.selectedWidgetId,
     isFormatPainterActive: s.isFormatPainterActive,
@@ -194,7 +198,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({ isFullScreen, onToggleFullScre
     const initialSchema = themeStartSchemaRef.current || schema;
     const updated = applyThemeColorToSchema(initialSchema, finalColor);
     setSchema(initialSchema, false);
-    setSchema(updated, true);
+    setSchema(updated, true, true);
     themeStartSchemaRef.current = null;
     setTemplateOptions({ themeColor: finalColor });
     if (shouldClose) {
@@ -385,12 +389,12 @@ export const Toolbar: React.FC<ToolbarProps> = ({ isFullScreen, onToggleFullScre
   };
 
   const handleFitWidth = () => {
-    const pageEl = document.getElementById('lego-canvas-page');
+    const pageEl = document.querySelector('.canvas-page-bg');
     const container = pageEl?.parentElement?.parentElement || pageEl?.parentElement;
     if (container && container.clientWidth) {
       const availableWidth = container.clientWidth;
-      const computedScale = Number(((availableWidth - 50) / 820).toFixed(2));
-      const finalScale = Math.min(1.5, Math.max(0.75, computedScale));
+      const computedScale = Number(((availableWidth - 50) / (schema.css.width || 820)).toFixed(2));
+      const finalScale = Math.min(1.5, Math.max(0.3, computedScale));
       setScale(finalScale);
     } else {
       setScale(1.15);
@@ -398,15 +402,29 @@ export const Toolbar: React.FC<ToolbarProps> = ({ isFullScreen, onToggleFullScre
   };
 
   const handleFitPage = () => {
-    const pageEl = document.getElementById('lego-canvas-page');
+    const pageEl = document.querySelector('.canvas-page-bg');
     const container = pageEl?.parentElement?.parentElement || pageEl?.parentElement;
     if (container && container.clientHeight) {
-      const availableHeight = container.clientHeight;
-      const computedScale = Number(((availableHeight - 60) / 1160).toFixed(2));
-      const finalScale = Math.min(1.2, Math.max(0.45, computedScale));
+      const pageWidth = schema.css.width || 820;
+      const computedScale = Number(Math.min(
+        (container.clientHeight - 60) / calculateA4PageHeight(pageWidth),
+        (container.clientWidth - 50) / pageWidth
+      ).toFixed(2));
+      const finalScale = Math.min(1.2, Math.max(0.3, computedScale));
       setScale(finalScale);
     } else {
       setScale(0.65);
+    }
+  };
+
+  const handleAddBlankPage = () => {
+    try {
+      addPage();
+      requestAnimationFrame(() => {
+        document.querySelectorAll('.canvas-page-bg').item(schema.componentsTree.length)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      });
+    } catch (error) {
+      alert(error instanceof Error ? error.message : '添加页面失败');
     }
   };
 
@@ -539,6 +557,15 @@ export const Toolbar: React.FC<ToolbarProps> = ({ isFullScreen, onToggleFullScre
 
       {/* Middle Tools: Design & Content Operations */}
       <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
+        <button
+          className="px-2 sm:px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-lg text-xs font-medium text-slate-100 flex items-center gap-1 disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap"
+          onClick={handleAddBlankPage}
+          disabled={!canAppendBlankPage(schema)}
+          title="在末尾添加一张可独立编辑和打印的空白页"
+        >
+          <FilePlus2 className="w-3.5 h-3.5" />
+          <span>加空白页</span>
+        </button>
         <button
           className="px-2 sm:px-2.5 py-1.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white rounded-lg text-xs font-semibold flex items-center gap-1 shadow-md shadow-blue-600/30 transition-all cursor-pointer whitespace-nowrap shrink-0"
           onClick={() => setImportResumeDialogOpen(true)}
@@ -1130,9 +1157,9 @@ export const Toolbar: React.FC<ToolbarProps> = ({ isFullScreen, onToggleFullScre
         </button>
       </div>
 
-      <SaveTemplateDialog open={saveDialogOpen} onClose={() => setSaveDialogOpen(false)} />
-      <ImportResumeDialog open={importResumeDialogOpen} onClose={() => setImportResumeDialogOpen(false)} />
-      <PhotoManagerDialog open={photoDialogOpen} onClose={() => setPhotoDialogOpen(false)} />
+      {saveDialogOpen && <SaveTemplateDialog open onClose={() => setSaveDialogOpen(false)} />}
+      {importResumeDialogOpen && <ImportResumeDialog open onClose={() => setImportResumeDialogOpen(false)} />}
+      {photoDialogOpen && <PhotoManagerDialog open onClose={() => setPhotoDialogOpen(false)} />}
 
       {/* 模板切换保留画布编辑确认弹窗 */}
       {templateSwitchDialog && (

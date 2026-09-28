@@ -5,6 +5,9 @@ import { WidgetRenderer } from './widgets/WidgetRenderer';
 import type { IWidget, IHJSchema } from '@/types/lego';
 import { Layers, Copy, Trash2, ArrowUp, ArrowDown, Maximize, Maximize2, Minimize2, Sparkles } from 'lucide-react';
 import { calculateTagWidth, reflowCanvasWidgetsForPagination, calculateA4PageHeight } from '@/lib/lego-adapter';
+import { applyMeasuredTextHeights } from '@/lib/lego-text-layout';
+import { canAppendBlankPage } from '@/lib/lego-pages';
+import { ensureLongTextPageSpacers } from '@/lib/lego-text-spacers';
 
 const SNAP_THRESHOLD = 5; // Pixels distance for magnetic snapping
 
@@ -13,6 +16,25 @@ const isTextWidget = (componentName: string) =>
   componentName === 'hj-[#exper-1]' ||
   componentName === 'hj-li' ||
   componentName.startsWith('hj-date');
+
+function measureTextHeight(element: HTMLElement, autoManaged: boolean): number {
+  if (!autoManaged) return element.offsetHeight;
+  const content = element.firstElementChild;
+  if (!(content instanceof HTMLElement)) return element.offsetHeight;
+  const clone = content.cloneNode(true) as HTMLElement;
+  clone.style.position = 'absolute';
+  clone.style.visibility = 'hidden';
+  clone.style.pointerEvents = 'none';
+  clone.style.width = `${element.clientWidth}px`;
+  clone.style.height = 'auto';
+  clone.style.minHeight = '0';
+  clone.style.maxHeight = 'none';
+  clone.style.overflow = 'visible';
+  element.appendChild(clone);
+  const height = Math.max(clone.offsetHeight, clone.scrollHeight);
+  clone.remove();
+  return height;
+}
 
 export interface LegoCanvasProps {
   isFullScreen?: boolean;
@@ -27,10 +49,12 @@ export const LegoCanvas: React.FC<LegoCanvasProps> = ({ isFullScreen, onToggleFu
     isFormatPainterActive,
     setSelectedWidgetId,
     setSelectedWidgetIds,
+    setPageActiveIndex,
     toggleWidgetSelection,
     applyCopiedStyle,
     updateWidgetCss,
     batchMoveWidgets,
+    moveWidgetsToPage,
     batchDeleteWidgets,
     deleteWidget,
     duplicateWidget,
@@ -48,10 +72,12 @@ export const LegoCanvas: React.FC<LegoCanvasProps> = ({ isFullScreen, onToggleFu
     isFormatPainterActive: state.isFormatPainterActive,
     setSelectedWidgetId: state.setSelectedWidgetId,
     setSelectedWidgetIds: state.setSelectedWidgetIds,
+    setPageActiveIndex: state.setPageActiveIndex,
     toggleWidgetSelection: state.toggleWidgetSelection,
     applyCopiedStyle: state.applyCopiedStyle,
     updateWidgetCss: state.updateWidgetCss,
     batchMoveWidgets: state.batchMoveWidgets,
+    moveWidgetsToPage: state.moveWidgetsToPage,
     batchDeleteWidgets: state.batchDeleteWidgets,
     deleteWidget: state.deleteWidget,
     duplicateWidget: state.duplicateWidget,
@@ -83,10 +109,15 @@ export const LegoCanvas: React.FC<LegoCanvasProps> = ({ isFullScreen, onToggleFu
     initialWidth: number;
     initialHeight: number;
     widgetId: string;
+    sourcePageIndex: number;
+    pointerOffsetX: number;
+    pointerOffsetY: number;
+    activeIds: string[];
     initialPositions: Record<string, { left: number; top: number }>;
     hasMoved: boolean;
     snapshotBeforeDrag: IHJSchema;
   } | null>(null);
+  const [dropTargetIndex, setDropTargetIndex] = useState<number | null>(null);
 
   // Rubberband / Box selection state (scoped to specific page)
   const [selectionBox, setSelectionBox] = useState<{
@@ -106,6 +137,64 @@ export const LegoCanvas: React.FC<LegoCanvasProps> = ({ isFullScreen, onToggleFu
   });
 
   const canvasRef = useRef<HTMLDivElement>(null);
+  const [layoutError, setLayoutError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas || typeof ResizeObserver === 'undefined' || dragState) return;
+    const textIds = new Set(schema.componentsTree.flatMap((page) =>
+      page.children.filter((widget) => isTextWidget(widget.componentName)).map((widget) => widget.id)));
+    const textWidgets = new Map(schema.componentsTree.flatMap((page) =>
+      page.children.filter((widget) => isTextWidget(widget.componentName)).map((widget) => [widget.id, widget] as const)));
+    const managedIds = new Set(schema.componentsTree.flatMap((page) =>
+      page.children.filter((widget) => widget.customProps?.__legoTextLayout).map((widget) => widget.id)));
+    const textElements = Array.from(canvas.querySelectorAll<HTMLElement>('[data-widget-id]'))
+      .filter((element) => textIds.has(element.dataset.widgetId || ''));
+    if (textElements.length === 0) return;
+
+    let frame = 0;
+    const measure = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        const heights: Record<string, number> = {};
+        for (const element of textElements) {
+          const id = element.dataset.widgetId;
+          if (!id) continue;
+          const widget = textWidgets.get(id);
+          const pageElement = element.closest<HTMLElement>('.canvas-page-bg');
+          const a4Height = calculateA4PageHeight(schema.css.width);
+          const topInset = Math.min(80, Math.max(20, schema.css.pagePadding?.top ?? 40));
+          const bottomInset = Math.min(80, Math.max(20, schema.css.pagePadding?.bottom ?? 40));
+          const needsPageSpacers = Boolean(widget?.componentName.startsWith('hj-text') && pageElement &&
+            (element.offsetHeight > a4Height - topInset - bottomInset ||
+              element.querySelector('[data-lego-page-spacer="true"]')));
+          if (needsPageSpacers && widget && pageElement) {
+            const intrinsic = measureTextHeight(element, true);
+            ensureLongTextPageSpacers(element, pageElement, widget, a4Height, topInset, bottomInset, intrinsic);
+          }
+          heights[id] = measureTextHeight(element, managedIds.has(id) || needsPageSpacers);
+        }
+        try {
+          const current = useLegoDesignerStore.getState().schema;
+          const updated = applyMeasuredTextHeights(current, heights);
+          if (updated !== current) setSchema(updated, false);
+          setLayoutError(null);
+        } catch (error) {
+          setLayoutError(error instanceof Error ? error.message : '文本布局更新失败');
+        }
+      });
+    };
+    const observer = new ResizeObserver(measure);
+    textElements.forEach((element) => {
+      observer.observe(element);
+      if (element.firstElementChild instanceof HTMLElement) observer.observe(element.firstElementChild);
+    });
+    measure();
+    return () => {
+      observer.disconnect();
+      cancelAnimationFrame(frame);
+    };
+  }, [schema, dragState, setSchema]);
 
   // Close context menu & clear selection on canvas background click
   const handleCanvasClick = () => {
@@ -113,6 +202,7 @@ export const LegoCanvas: React.FC<LegoCanvasProps> = ({ isFullScreen, onToggleFu
   };
 
   const handlePagePointerDown = (e: React.PointerEvent, pageIndex: number, pageId: string) => {
+    setPageActiveIndex(pageIndex);
     if (contextMenu) setContextMenu(null);
 
     const target = e.target as HTMLElement;
@@ -178,11 +268,19 @@ export const LegoCanvas: React.FC<LegoCanvasProps> = ({ isFullScreen, onToggleFu
     const activeIds = isShift
       ? (selectedWidgetIds.includes(widget.id) ? selectedWidgetIds : [...selectedWidgetIds, widget.id])
       : (selectedWidgetIds.includes(widget.id) ? selectedWidgetIds : [widget.id]);
+    const sourcePageEl = (e.currentTarget as HTMLElement).closest<HTMLElement>('.canvas-page-bg');
+    const sourcePageIndex = Array.from(canvasRef.current?.querySelectorAll('.canvas-page-bg') || []).indexOf(sourcePageEl as Element);
+    const sourcePage = schema.componentsTree[sourcePageIndex];
+    if (!sourcePageEl || !sourcePage) return;
+    setPageActiveIndex(sourcePageIndex);
+    const sourceIds = activeIds.filter((id) => sourcePage.children.some((item) => item.id === id));
+    if (sourceIds.length !== activeIds.length) setSelectedWidgetIds(sourceIds);
+    const pageRect = sourcePageEl.getBoundingClientRect();
 
     const initialPositions: Record<string, { left: number; top: number }> = {};
     for (const page of schema.componentsTree || []) {
       for (const w of page.children || []) {
-        if (activeIds.includes(w.id)) {
+        if (sourceIds.includes(w.id)) {
           initialPositions[w.id] = { left: w.css.left, top: w.css.top };
         }
       }
@@ -198,6 +296,10 @@ export const LegoCanvas: React.FC<LegoCanvasProps> = ({ isFullScreen, onToggleFu
       initialWidth: widget.css.width,
       initialHeight: widget.css.height,
       widgetId: widget.id,
+      sourcePageIndex,
+      pointerOffsetX: (e.clientX - pageRect.left) / scale - widget.css.left,
+      pointerOffsetY: (e.clientY - pageRect.top) / scale - widget.css.top,
+      activeIds: sourceIds,
       initialPositions,
       hasMoved: false,
       snapshotBeforeDrag: JSON.parse(JSON.stringify(schema))
@@ -226,10 +328,32 @@ export const LegoCanvas: React.FC<LegoCanvasProps> = ({ isFullScreen, onToggleFu
       initialWidth: widget.css.width,
       initialHeight: widget.css.height,
       widgetId: widget.id,
+      sourcePageIndex: schema.componentsTree.findIndex((page) => page.children.some((item) => item.id === widget.id)),
+      pointerOffsetX: 0,
+      pointerOffsetY: 0,
+      activeIds: [widget.id],
       initialPositions: { [widget.id]: { left: widget.css.left, top: widget.css.top } },
       hasMoved: false,
       snapshotBeforeDrag: JSON.parse(JSON.stringify(schema))
     });
+  };
+
+  const locateDropTarget = (clientX: number, clientY: number): { index: number; rect: DOMRect } | null => {
+    const canvas = canvasRef.current;
+    if (!canvas) return null;
+    const pages = Array.from(canvas.querySelectorAll<HTMLElement>('.canvas-page-bg'));
+    for (const [index, page] of pages.entries()) {
+      const rect = page.getBoundingClientRect();
+      if (clientX >= rect.left - 40 && clientX <= rect.right + 40 &&
+          clientY >= rect.top - 20 && clientY <= rect.bottom + 20) return { index, rect };
+    }
+    const nextPage = canvas.querySelector<HTMLElement>('[data-next-page-drop]');
+    if (nextPage) {
+      const rect = nextPage.getBoundingClientRect();
+      if (clientX >= rect.left - 40 && clientX <= rect.right + 40 &&
+          clientY >= rect.top - 30 && clientY <= rect.bottom + 20) return { index: pages.length, rect };
+    }
+    return null;
   };
 
   // Drag & Resize & Rubberband Selection Pointer Move
@@ -269,6 +393,20 @@ export const LegoCanvas: React.FC<LegoCanvasProps> = ({ isFullScreen, onToggleFu
     // 2. Dragging & Resizing
     if (!dragState) return;
 
+    if (dragState.isDragging && canvasRef.current) {
+      const viewport = canvasRef.current;
+      const bounds = viewport.getBoundingClientRect();
+      if (e.clientY > bounds.bottom - 48) viewport.scrollTop += 24;
+      else if (e.clientY < bounds.top + 48) viewport.scrollTop -= 24;
+      const destination = locateDropTarget(e.clientX, e.clientY);
+      setDropTargetIndex((current) => current === destination?.index ? current : destination?.index ?? null);
+      if (destination && destination.index !== dragState.sourcePageIndex) {
+        setGuides({ vertical: [], horizontal: [] });
+        dragState.hasMoved = true;
+        return;
+      }
+    }
+
     const rawDeltaX = (e.clientX - dragState.startX) / scale;
     const rawDeltaY = (e.clientY - dragState.startY) / scale;
 
@@ -281,12 +419,13 @@ export const LegoCanvas: React.FC<LegoCanvasProps> = ({ isFullScreen, onToggleFu
     );
     const pageWidgets: IWidget[] = targetPage?.children || [];
 
-    const activeIds = selectedWidgetIds.includes(dragState.widgetId) ? selectedWidgetIds : [dragState.widgetId];
+    const activeIds = dragState.activeIds;
     const unselectedWidgets = pageWidgets.filter((w) => !activeIds.includes(w.id));
 
     // Alignment snapping targets
     const vTargets: number[] = [0, (schema.css?.width || 820) / 2, schema.css?.width || 820];
-    const hTargets: number[] = [0, (schema.css?.height || 1160) / 2, schema.css?.height || 1160];
+    const sourceCanvasHeight = schema.componentsTree[dragState.sourcePageIndex]?.height || schema.css?.height || 1160;
+    const hTargets: number[] = [0, sourceCanvasHeight / 2, sourceCanvasHeight];
 
     unselectedWidgets.forEach((w) => {
       vTargets.push(w.css.left, w.css.left + w.css.width / 2, w.css.left + w.css.width);
@@ -339,6 +478,8 @@ export const LegoCanvas: React.FC<LegoCanvasProps> = ({ isFullScreen, onToggleFu
       }
 
       setGuides({ vertical: activeGuidesV, horizontal: activeGuidesH });
+
+      targetTop = Math.max(0, Math.min(targetTop, sourceCanvasHeight - dragState.initialHeight));
 
       const finalDeltaX = targetLeft - dragState.initialLeft;
       const finalDeltaY = targetTop - dragState.initialTop;
@@ -397,11 +538,39 @@ export const LegoCanvas: React.FC<LegoCanvasProps> = ({ isFullScreen, onToggleFu
       }
     }
     if (dragState) {
-      if (dragState.hasMoved) {
+      let transferred = false;
+      let failed = false;
+      if (dragState.isDragging && dragState.hasMoved && e) {
+        const destination = locateDropTarget(e.clientX, e.clientY);
+        if (destination && destination.index !== dragState.sourcePageIndex) {
+          try {
+            transferred = moveWidgetsToPage(
+              dragState.activeIds,
+              destination.index,
+              dragState.widgetId,
+              {
+                left: Math.max(0, (e.clientX - destination.rect.left) / scale - dragState.pointerOffsetX),
+                top: Math.max(0, (e.clientY - destination.rect.top) / scale - dragState.pointerOffsetY),
+              },
+              dragState.initialPositions,
+              dragState.snapshotBeforeDrag,
+            );
+            if (transferred && destination.index === schema.componentsTree.length) {
+              requestAnimationFrame(() => canvasRef.current?.querySelectorAll('.canvas-page-bg').item(destination.index)?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+            }
+          } catch (error) {
+            failed = true;
+            setSchema(dragState.snapshotBeforeDrag, false, true);
+            setLayoutError(error instanceof Error ? error.message : '无法移动组件到目标页');
+          }
+        }
+      }
+      if (dragState.hasMoved && !transferred && !failed) {
         commitHistorySnapshot(dragState.snapshotBeforeDrag);
       }
       setDragState(null);
     }
+    setDropTargetIndex(null);
     if (selectionBox) setSelectionBox(null);
     setGuides({ vertical: [], horizontal: [] });
   };
@@ -474,11 +643,6 @@ export const LegoCanvas: React.FC<LegoCanvasProps> = ({ isFullScreen, onToggleFu
   const canvasWidth = schema.css?.width || 820;
   const pageHeight = calculateA4PageHeight(canvasWidth);
   const canvasHeight = schema.css?.height || pageHeight;
-  const pageBreakCount = Math.floor((canvasHeight - 20) / pageHeight);
-  const pageBreaks: number[] = [];
-  for (let i = 1; i <= pageBreakCount; i++) {
-    pageBreaks.push(i * pageHeight);
-  }
 
   return (
     <div
@@ -491,12 +655,20 @@ export const LegoCanvas: React.FC<LegoCanvasProps> = ({ isFullScreen, onToggleFu
       onPointerUp={handlePointerUp}
       onPointerCancel={handlePointerUp}
     >
+      {layoutError && (
+        <div data-canvas-ui="true" className="sticky top-2 z-[200] rounded bg-amber-100 px-3 py-2 text-xs text-amber-900 shadow">
+          {layoutError}
+        </div>
+      )}
       <div
         className="transition-transform origin-top duration-75 flex flex-col gap-8 items-center"
         style={{ transform: `scale(${scale})` }}
       >
         {(schema?.componentsTree || []).map((page, pageIndex) => {
           const pageId = page.id || `page-${pageIndex + 1}`;
+          const pageCanvasHeight = page.height || canvasHeight;
+          const pageBreakCount = Math.floor((pageCanvasHeight - 20) / pageHeight);
+          const pageBreaks = Array.from({ length: pageBreakCount }, (_, index) => (index + 1) * pageHeight);
           const pagePadding = schema.css?.pagePadding || { top: 0, right: 0, bottom: 0, left: 0 };
           const hasPadding = pagePadding.top > 0 || pagePadding.right > 0 || pagePadding.bottom > 0 || pagePadding.left > 0;
 
@@ -520,10 +692,10 @@ export const LegoCanvas: React.FC<LegoCanvasProps> = ({ isFullScreen, onToggleFu
           <div
             key={pageId}
             id={`lego-canvas-page-${pageId}`}
-            className="canvas-page-bg relative bg-white shadow-2xl rounded-sm border border-slate-300 overflow-hidden"
+            className={`canvas-page-bg relative bg-white shadow-2xl rounded-sm border overflow-hidden ${dropTargetIndex === pageIndex && dragState?.isDragging && pageIndex !== dragState.sourcePageIndex ? 'border-indigo-500 ring-4 ring-indigo-400/50' : 'border-slate-300'}`}
             style={{
               width: `${schema.css?.width || 820}px`,
-              height: `${canvasHeight}px`
+              height: `${pageCanvasHeight}px`
             }}
             data-page-padding={JSON.stringify(pagePadding)}
             onPointerDown={(e) => handlePagePointerDown(e, pageIndex, pageId)}
@@ -644,6 +816,15 @@ export const LegoCanvas: React.FC<LegoCanvasProps> = ({ isFullScreen, onToggleFu
           </div>
           );
         })}
+        {dragState?.isDragging && canAppendBlankPage(schema) && (
+          <div
+            data-next-page-drop="true"
+            className={`flex items-center justify-center border-2 border-dashed rounded-sm bg-white/70 text-sm font-semibold ${dropTargetIndex === schema.componentsTree.length ? 'border-indigo-500 text-indigo-700 ring-4 ring-indigo-400/40' : 'border-slate-400 text-slate-500'}`}
+            style={{ width: `${canvasWidth}px`, height: `${pageHeight}px` }}
+          >
+            拖到此处并松开，自动添加第 {schema.componentsTree.length + 1} 页
+          </div>
+        )}
       </div>
 
       {/* Context Menu */}

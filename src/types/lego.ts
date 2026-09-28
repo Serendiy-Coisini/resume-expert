@@ -83,6 +83,10 @@ export interface IPageComponent {
   id: string;
   componentName: 'page';
   commentType: 'page';
+  /** Optional canvas height; legacy pages inherit schema.css.height. */
+  height?: number;
+  /** Original explicit page height before automatic text expansion. */
+  autoLayoutBaseHeight?: number;
   children: IWidget[];
 }
 

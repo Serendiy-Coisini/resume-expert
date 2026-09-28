@@ -1,5 +1,6 @@
 import React from 'react';
 import { sanitizeRichText } from '@/lib/safe-html';
+import { safeLegoImageSource } from '@/lib/lego-image';
 import type { IWidget } from '@/types/lego';
 import { User, Image as ImageIcon, Smile, Mail, MapPin, Phone, Github, Linkedin, Camera, Star } from 'lucide-react';
 
@@ -17,7 +18,7 @@ export function renderFormattedText(text: unknown) {
     .replace(/\[size=(.*?)\](.*?)\[\/size\]/g, '<span style="font-size:$1px;">$2</span>')
     .replace(/\[bg=(.*?)\](.*?)\[\/bg\]/g, '<mark style="background-color:$1;padding:0 4px;border-radius:3px;">$2</mark>');
 
-  return <span dangerouslySetInnerHTML={{ __html: sanitizeRichText(html) }} />;
+  return <span data-lego-text-content="true" dangerouslySetInnerHTML={{ __html: sanitizeRichText(html) }} />;
 }
 
 interface WidgetRendererProps {
@@ -26,7 +27,7 @@ interface WidgetRendererProps {
 
 export const WidgetRenderer: React.FC<WidgetRendererProps> = ({ widget }) => {
   const { componentName, css, dataSource } = widget;
-  const avatarSrc = (dataSource.avatarSrc || dataSource.src) as string | undefined;
+  const avatarSrc = safeLegoImageSource(dataSource.avatarSrc || dataSource.src);
 
   const isTextType =
     componentName.startsWith('hj-text') ||
@@ -287,7 +288,7 @@ export const WidgetRenderer: React.FC<WidgetRendererProps> = ({ widget }) => {
   }
 
   if (componentName === 'hj-other-2') {
-    const qrSrc = (dataSource.qrCodeSrc || dataSource.src || dataSource.avatarSrc) as string | undefined;
+    const qrSrc = safeLegoImageSource(dataSource.qrCodeSrc || dataSource.src || dataSource.avatarSrc);
     return (
       <div style={{ ...style, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', backgroundColor: css.backgroundColor || '#f8fafc', padding: '4px' }}>
         {qrSrc ? (

@@ -1,4 +1,5 @@
 import sanitizeHtml from "sanitize-html";
+import { safeLegoImageSource } from '@/lib/lego-image';
 
 export function sanitizeRichText(html: string): string {
   return sanitizeHtml(html, {
@@ -148,6 +149,9 @@ export function sanitizePrintHTML(html: string): string {
     },
     transformTags: {
       "*": (tagName, attribs) => {
+        if (tagName === 'img' && attribs.src) {
+          attribs.src = safeLegoImageSource(attribs.src);
+        }
         if (attribs.style) {
           attribs.style = sanitizeCSS(attribs.style);
         }

@@ -68,7 +68,7 @@ export default function DesignerPage() {
         <LegoDesigner standalone={true} />
       </main>
 
-      <ImportResumeDialog open={importDialogOpen} onClose={() => setImportDialogOpen(false)} />
+      {importDialogOpen && <ImportResumeDialog open onClose={() => setImportDialogOpen(false)} />}
     </div>
   );
 }
