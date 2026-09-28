@@ -697,6 +697,7 @@ export function normalizeLegoSchema(rawJson: unknown): IHJSchema {
           autoLayoutBaseHeight: pageHeight !== undefined && typeof pObj.autoLayoutBaseHeight === 'number' && Number.isFinite(pObj.autoLayoutBaseHeight)
             ? Math.min(pageHeight, Math.max(calculateA4PageHeight(safeWidth), pObj.autoLayoutBaseHeight))
             : undefined,
+          retainWhenEmpty: pObj.retainWhenEmpty === true,
           children: childrenList.map((w: unknown, wIdx: number) =>
             ensureValidWidget(w as Record<string, unknown>, wIdx, seenIds)
           )

@@ -10,7 +10,7 @@ export function canAppendBlankPage(schema: IHJSchema): boolean {
     currentSlices + 1 <= MAX_LEGO_PRINT_PAGES;
 }
 
-export function appendBlankPage(schema: IHJSchema): IHJSchema {
+export function appendBlankPage(schema: IHJSchema, retainWhenEmpty = true): IHJSchema {
   if (!canAppendBlankPage(schema)) {
     throw new Error(`页面数量已达到限制（最多 ${MAX_LEGO_SCHEMA_PAGES} 个画布页、${MAX_LEGO_PRINT_PAGES} 个打印页）`);
   }
@@ -24,6 +24,7 @@ export function appendBlankPage(schema: IHJSchema): IHJSchema {
       componentName: 'page',
       commentType: 'page',
       height: calculateA4PageHeight(schema.css.width),
+      retainWhenEmpty,
       children: [],
     }],
   };
@@ -51,7 +52,7 @@ export function moveWidgetsToCanvasPage(
   const moving = source.children.filter((widget) => ids.has(widget.id));
   if (moving.length === 0 || !moving.some((widget) => widget.id === primaryId)) return schema;
 
-  const withTarget = targetIndex === schema.componentsTree.length ? appendBlankPage(schema) : schema;
+  const withTarget = targetIndex === schema.componentsTree.length ? appendBlankPage(schema, false) : schema;
   const destination = withTarget.componentsTree[targetIndex];
   if (destination.children.length + moving.length > 500) {
     throw new Error('目标页组件数量不能超过 500 个');
@@ -88,13 +89,16 @@ export function moveWidgetsToCanvasPage(
   const destinationHeight = finalBottom > targetHeight
     ? Math.ceil((finalBottom + 40) / pageHeight) * pageHeight
     : targetHeight;
-  const result: IHJSchema = {
-    ...withTarget,
-    componentsTree: withTarget.componentsTree.map((page, index) => index === sourceIndex
+  const pages = withTarget.componentsTree.map((page, index) => index === sourceIndex
       ? { ...page, children: page.children.filter((widget) => !ids.has(widget.id)) }
       : index === targetIndex
         ? { ...page, height: destinationHeight, children: [...page.children, ...moved] }
-        : page),
+        : page);
+  const removeEmptySource = sourceIndex > 0 && !source.retainWhenEmpty &&
+    pages[sourceIndex].children.length === 0 && pages.length > 1;
+  const result: IHJSchema = {
+    ...withTarget,
+    componentsTree: removeEmptySource ? pages.filter((_, index) => index !== sourceIndex) : pages,
   };
   const totalSlices = result.componentsTree.reduce((count, page) =>
     count + Math.ceil((page.height || result.css.height) / pageHeight), 0);

@@ -556,7 +556,8 @@ export const LegoCanvas: React.FC<LegoCanvasProps> = ({ isFullScreen, onToggleFu
               dragState.snapshotBeforeDrag,
             );
             if (transferred && destination.index === schema.componentsTree.length) {
-              requestAnimationFrame(() => canvasRef.current?.querySelectorAll('.canvas-page-bg').item(destination.index)?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+              const newPageIndex = useLegoDesignerStore.getState().pageActiveIndex;
+              requestAnimationFrame(() => canvasRef.current?.querySelectorAll('.canvas-page-bg').item(newPageIndex)?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
             }
           } catch (error) {
             failed = true;

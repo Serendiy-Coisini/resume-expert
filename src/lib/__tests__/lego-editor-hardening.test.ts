@@ -151,6 +151,7 @@ test('blank pages print independently and page creation obeys the shared limit',
   assert.equal(next.componentsTree.length, 2);
   assert.deepEqual(next.componentsTree[1].children, []);
   assert.notEqual(next.componentsTree[0].id, next.componentsTree[1].id);
+  assert.equal(next.componentsTree[1].retainWhenEmpty, true);
   const longCanvas = canvas([widget('long', 20, 1800, 40)]);
   longCanvas.css.height = 2320;
   const withOneA4Page = appendBlankPage(longCanvas);
@@ -159,6 +160,7 @@ test('blank pages print independently and page creation obeys the shared limit',
   const normalized = validateAndNormalizeLegoJson(withOneA4Page);
   assert.equal(normalized.success, true);
   assert.equal(normalized.data?.componentsTree[1].height, 1160);
+  assert.equal(normalized.data?.componentsTree[1].retainWhenEmpty, true);
   const duplicatedIds = structuredClone(withOneA4Page);
   duplicatedIds.componentsTree[1].id = duplicatedIds.componentsTree[0].id;
   assert.notEqual(normalizePageIds(duplicatedIds)[0], normalizePageIds(duplicatedIds)[1]);
@@ -204,6 +206,60 @@ test('cross-page drag moves the selected group and automatically creates the las
   assert.deepEqual(moved.componentsTree[1].children.map((item) => [item.id, item.css.left, item.css.top]),
     [['first', 100, 80], ['second', 100, 140]]);
   assert.deepEqual(initial.componentsTree[0].children.map((item) => item.id), ['first', 'second']);
+});
+
+test('drag-created empty page is removed when its last widget returns, including legacy drafts', () => {
+  const initial = canvas([widget('round-trip', 20, 40, 40)]);
+  const forward = moveWidgetsToCanvasPage(initial, ['round-trip'], 1, 'round-trip',
+    { left: 70, top: 80 }, { 'round-trip': { left: 20, top: 40 } });
+  assert.equal(forward.componentsTree[1].retainWhenEmpty, false);
+  const back = moveWidgetsToCanvasPage(forward, ['round-trip'], 0, 'round-trip',
+    { left: 20, top: 40 }, { 'round-trip': { left: 70, top: 80 } });
+  assert.equal(back.componentsTree.length, 1);
+  assert.deepEqual(back.componentsTree[0].children.map((item) => item.id), ['round-trip']);
+  assert.equal(forward.componentsTree.length, 2);
+
+  const legacy = structuredClone(forward);
+  delete legacy.componentsTree[1].retainWhenEmpty;
+  const legacyBack = moveWidgetsToCanvasPage(legacy, ['round-trip'], 0, 'round-trip',
+    { left: 20, top: 40 }, { 'round-trip': { left: 70, top: 80 } });
+  assert.equal(legacyBack.componentsTree.length, 1);
+});
+
+test('manually added blank pages remain after their last widget moves away', () => {
+  const initial = canvas([widget('manual-page-widget', 20, 40, 40)]);
+  const manual = appendBlankPage(initial);
+  const occupied = moveWidgetsToCanvasPage(manual, ['manual-page-widget'], 1, 'manual-page-widget',
+    { left: 70, top: 80 }, { 'manual-page-widget': { left: 20, top: 40 } });
+  const back = moveWidgetsToCanvasPage(occupied, ['manual-page-widget'], 0, 'manual-page-widget',
+    { left: 20, top: 40 }, { 'manual-page-widget': { left: 70, top: 80 } });
+  assert.equal(back.componentsTree.length, 2);
+  assert.deepEqual(back.componentsTree[1].children, []);
+  assert.equal(back.componentsTree[1].retainWhenEmpty, true);
+});
+
+test('removing an empty middle page keeps the destination index and undo history correct', () => {
+  const snapshot = useLegoDesignerStore.getState();
+  try {
+    const initial = canvas([widget('middle-page-widget', 20, 40, 40)]);
+    const autoPage = moveWidgetsToCanvasPage(initial, ['middle-page-widget'], 1, 'middle-page-widget',
+      { left: 70, top: 80 }, { 'middle-page-widget': { left: 20, top: 40 } });
+    const withManualLastPage = appendBlankPage(autoPage);
+    snapshot.setSchema(withManualLastPage, false);
+    const beforeMove = useLegoDesignerStore.getState().schema;
+    assert.equal(snapshot.moveWidgetsToPage(['middle-page-widget'], 2, 'middle-page-widget',
+      { left: 30, top: 50 }, { 'middle-page-widget': { left: 70, top: 80 } }, beforeMove), true);
+    const afterMove = useLegoDesignerStore.getState();
+    assert.equal(afterMove.schema.componentsTree.length, 2);
+    assert.equal(afterMove.pageActiveIndex, 1);
+    assert.equal(afterMove.schema.componentsTree[1].children[0].id, 'middle-page-widget');
+    afterMove.undo();
+    assert.equal(useLegoDesignerStore.getState().schema.componentsTree.length, 3);
+    afterMove.redo();
+    assert.equal(useLegoDesignerStore.getState().schema.componentsTree.length, 2);
+  } finally {
+    useLegoDesignerStore.setState(snapshot, true);
+  }
 });
 
 test('moving expanded text clears its old page shift and grows the destination to fit', () => {

@@ -87,6 +87,8 @@ export interface IPageComponent {
   height?: number;
   /** Original explicit page height before automatic text expansion. */
   autoLayoutBaseHeight?: number;
+  /** Keep a page added explicitly by the user when its last widget moves away. */
+  retainWhenEmpty?: boolean;
   children: IWidget[];
 }
 

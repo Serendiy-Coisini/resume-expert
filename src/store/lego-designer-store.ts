@@ -936,10 +936,13 @@ export const useLegoDesignerStore = create<LegoDesignerState>((set, get) => {
       if (movedSchema === schema) return false;
       const normalized = normalizeLegoSchema(movedSchema);
       const historyUpdate = saveStateToHistory(previousSchema);
-      const movedIds = widgetIds.filter((id) => normalized.componentsTree[targetPageIndex].children.some((widget) => widget.id === id));
+      const resolvedTargetIndex = normalized.componentsTree.findIndex((page) =>
+        page.children.some((widget) => widget.id === primaryId));
+      if (resolvedTargetIndex < 0) throw new Error('移动后找不到目标组件');
+      const movedIds = widgetIds.filter((id) => normalized.componentsTree[resolvedTargetIndex].children.some((widget) => widget.id === id));
       set({
         schema: normalized,
-        pageActiveIndex: targetPageIndex,
+        pageActiveIndex: resolvedTargetIndex,
         selectedWidgetIds: movedIds,
         selectedWidgetId: movedIds.at(-1) || null,
         ...historyUpdate,
