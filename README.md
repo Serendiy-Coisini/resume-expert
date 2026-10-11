@@ -153,6 +153,8 @@ LLM_PROVIDER=deepseek
 
 共享模型按实际上游请求计数（含重试），每日默认每人 40 次、总计 200 次，同时最多每人 2 个、全局 4 个请求。计数在单个 Node 进程内维护，UTC 日切换或进程重启会重置；这不是金额上限。请同时设置模型服务商的消费上限。多实例、集群和 Serverless 部署应保持 `ALLOW_SERVER_LLM_KEY=false`、使用 BYOK，直到接入共享鉴权和持久化配额服务。只有入口代理会覆盖客户端伪造的 IP 头时，才启用 `TRUST_PROXY_HEADERS=true`。
 
+若未启用可信代理头，所有没有有效服务访问口令的访客会共用 `untrusted-client` 限流桶，公开 BYOK 部署可能相互影响。需要按访客限流时，应先在可信入口代理覆盖客户端提交的 IP 头，再启用 `TRUST_PROXY_HEADERS=true`；多实例部署还需使用共享的限流存储。不能用客户端自报的会话 ID 代替可信访客身份。
+
 ### 文件解析部署与限制
 
 PDF、Word 和 OCR 在独立 Node 子进程处理：最多 2 个并发解析、4 个排队请求，排队与处理总计最多 45 秒；取消请求会终止子进程。生产部署须允许创建子进程，并保留 `scripts/document-worker.cjs`、根目录 `chi_sim.traineddata` 及完整生产依赖（推荐 `npm ci` 后 `npm run build && npm start`）。裁剪或 standalone 部署须验证解析依赖及字库完整；不支持创建子进程的平台需另部署解析服务。

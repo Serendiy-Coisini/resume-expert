@@ -1,16 +1,18 @@
 "use client";
 
 import React, { useState } from "react";
+import dynamic from "next/dynamic";
 import Link from "next/link";
 import { ArrowLeft, Save, FileText, FileUp } from "lucide-react";
 import { LegoDesigner } from "@/components/legoDesigner";
-import { ImportResumeDialog } from "@/components/legoDesigner/ImportResumeDialog";
 import { useLegoDesignerStore } from "@/store/lego-designer-store";
 import { saveLegoDraft } from "@/lib/lego-draft";
 
+const ImportResumeDialog = dynamic(() => import("@/components/legoDesigner/ImportResumeDialog").then((module) => module.ImportResumeDialog), { ssr: false });
+
 export default function DesignerPage() {
   const [importDialogOpen, setImportDialogOpen] = useState(false);
-  const { schema } = useLegoDesignerStore();
+  const schema = useLegoDesignerStore((state) => state.schema);
 
   const handleSaveDraft = () => {
     const result = saveLegoDraft(schema);

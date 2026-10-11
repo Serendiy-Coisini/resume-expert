@@ -6,6 +6,7 @@ import { RightSetter } from './RightSetter';
 import { useLegoDesignerStore } from '@/store/lego-designer-store';
 import { getResumeSourceKey, useResumeStore } from '@/store/resume-store';
 import { buildLegoSchemaFromResume } from '@/lib/lego-adapter';
+import { shouldInitializeCanvas } from '@/lib/lego-editor-selectors';
 import { Layout, PlusCircle, Settings } from 'lucide-react';
 import { useShallow } from 'zustand/react/shallow';
 
@@ -57,7 +58,6 @@ export const LegoDesigner: React.FC<LegoDesignerProps> = ({
   const [isResizingRight, setIsResizingRight] = useState(false);
 
   const containerRef = useRef<HTMLDivElement>(null);
-  const lastTemplateRef = useRef<string | null>(null);
   // Ref bridging Toolbar's ImportResumeDialog opener → LeftComList's onImportResume.
   // This avoids a second dialog instance in LeftComList while keeping dialog state in Toolbar.
   const importOpenerRef = useRef<(() => void) | null>(null);
@@ -67,9 +67,7 @@ export const LegoDesigner: React.FC<LegoDesignerProps> = ({
   // Initialize schema only on first load when canvas is empty
   useEffect(() => {
     if (staleCanvas) return;
-    const currentChildren = schema.componentsTree?.[0]?.children || [];
-
-    if (currentChildren.length === 0) {
+    if (shouldInitializeCanvas(schema, sourceKey)) {
       const initialSchema = buildLegoSchemaFromResume(
         userInput,
         effectiveAnalysisResult,
@@ -79,7 +77,6 @@ export const LegoDesigner: React.FC<LegoDesignerProps> = ({
       );
       setSchema(initialSchema, false);
     }
-    lastTemplateRef.current = selectedTemplate;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedTemplate, setSchema]);
 

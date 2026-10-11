@@ -15,9 +15,11 @@ export interface UserAIConfig {
 interface AIConfigState {
   config: UserAIConfig;
   forceMock: boolean;
+  rememberCredentials: boolean;
   hasHydrated: boolean;
   setConfig: (config: Partial<UserAIConfig>) => void;
   resetConfig: () => void;
+  setRememberCredentials: (remember: boolean) => void;
   setHasHydrated: (state: boolean) => void;
 }
 
@@ -34,6 +36,7 @@ export const useAIConfigStore = create<AIConfigState>()(
     (set) => ({
       config: DEFAULT_CONFIG,
       forceMock: false,
+      rememberCredentials: true,
       hasHydrated: false,
       setConfig: (newConfig) =>
         set((state) => ({
@@ -48,11 +51,21 @@ export const useAIConfigStore = create<AIConfigState>()(
           config: { ...DEFAULT_CONFIG },
           forceMock: true,
         }),
+      setRememberCredentials: (rememberCredentials) => set({ rememberCredentials }),
       setHasHydrated: (state) => set({ hasHydrated: state }),
     }),
     {
       name: "resume_expert_user_ai_config",
       storage: createJSONStorage(() => safeBrowserStorage),
+      partialize: (state) => ({
+        config: {
+          ...state.config,
+          apiKey: state.rememberCredentials ? state.config.apiKey : '',
+          serverAccessToken: state.rememberCredentials ? state.config.serverAccessToken : '',
+        },
+        forceMock: state.forceMock,
+        rememberCredentials: state.rememberCredentials,
+      }),
       onRehydrateStorage: () => (state) => {
         state?.setHasHydrated(true);
       },
@@ -66,6 +79,12 @@ export const useAIConfigStore = create<AIConfigState>()(
  */
 export function getUserAIConfig(): UserAIConfig | null {
   if (typeof window === "undefined") return null;
+
+  const state = useAIConfigStore.getState();
+  if (!state.rememberCredentials) {
+    const config = state.config;
+    return config.apiKey.trim() ? { ...config, apiKey: config.apiKey.trim() } : null;
+  }
 
   try {
     const stored = safeBrowserStorage.getItem("resume_expert_user_ai_config");
@@ -85,7 +104,7 @@ export function getUserAIConfig(): UserAIConfig | null {
   } catch {
     // ignore parse errors
   }
-  const config = useAIConfigStore.getState().config;
+  const config = state.config;
   return config.apiKey.trim() ? { ...config, apiKey: config.apiKey.trim() } : null;
 }
 

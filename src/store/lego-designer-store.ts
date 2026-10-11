@@ -458,8 +458,16 @@ export const useLegoDesignerStore = create<LegoDesignerState>((set, get) => {
     // Batch operations
     batchMoveWidgets: (widgetIds, deltaX, deltaY, initialPositions, saveHistory = true) => {
       const { schema } = get();
-      const historyUpdate = saveHistory ? saveStateToHistory(schema) : {};
       const targets = new Set(widgetIds);
+      const hasMoved = schema.componentsTree.some((page) => page.children?.some((widget) => {
+        const initial = initialPositions[widget.id];
+        return targets.has(widget.id) && initial && (
+          widget.css.left !== Math.max(0, Math.round(initial.left + deltaX)) ||
+          widget.css.top !== Math.max(0, Math.round(initial.top + deltaY))
+        );
+      }));
+      if (!hasMoved) return;
+      const historyUpdate = saveHistory ? saveStateToHistory(schema) : {};
       const newSchema = {
         ...schema,
         componentsTree: schema.componentsTree.map((page) => ({
@@ -595,6 +603,13 @@ export const useLegoDesignerStore = create<LegoDesignerState>((set, get) => {
 
     updateWidgetCss: (widgetId, cssUpdate, saveHistory = true) => {
       const { schema } = get();
+      let currentWidget: IWidget | undefined;
+      for (const page of schema.componentsTree) {
+        currentWidget = page.children.find((widget) => widget.id === widgetId);
+        if (currentWidget) break;
+      }
+      if (!currentWidget || Object.entries(cssUpdate).every(([key, value]) =>
+        currentWidget.css[key as keyof IWidgetCss] === value)) return;
       const historyUpdate = saveHistory ? saveStateToHistory(schema) : {};
       const newSchema = {
         ...schema,

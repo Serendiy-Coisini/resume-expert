@@ -697,7 +697,9 @@ export function normalizeLegoSchema(rawJson: unknown): IHJSchema {
           autoLayoutBaseHeight: pageHeight !== undefined && typeof pObj.autoLayoutBaseHeight === 'number' && Number.isFinite(pObj.autoLayoutBaseHeight)
             ? Math.min(pageHeight, Math.max(calculateA4PageHeight(safeWidth), pObj.autoLayoutBaseHeight))
             : undefined,
-          retainWhenEmpty: pObj.retainWhenEmpty === true,
+          // Older drafts have no origin marker. Preserve their blank pages rather than
+          // treating an unknown page as automatically created.
+          retainWhenEmpty: typeof pObj.retainWhenEmpty === 'boolean' ? pObj.retainWhenEmpty : true,
           children: childrenList.map((w: unknown, wIdx: number) =>
             ensureValidWidget(w as Record<string, unknown>, wIdx, seenIds)
           )

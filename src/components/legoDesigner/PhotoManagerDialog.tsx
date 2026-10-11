@@ -3,6 +3,8 @@ import React, { useState, useRef, useEffect } from 'react';
 import { useLegoDesignerStore } from '@/store/lego-designer-store';
 import { useResumeStore } from '@/store/resume-store';
 import type { IWidget } from '@/types/lego';
+import { findAvatarLocation, isAvatarWidget } from '@/lib/lego-editor-selectors';
+import { useShallow } from 'zustand/react/shallow';
 import { approveExternalLegoImageSource, isExternalLegoImageSource, safeLegoImageSource, validateLocalLegoImage } from '@/lib/lego-image';
 import {
   User,
@@ -28,15 +30,23 @@ type AvatarSizePreset = '1inch' | '2inch' | 'square' | 'compact';
 type AvatarPosition = 'top-right' | 'top-left' | 'sidebar';
 
 export const PhotoManagerDialog: React.FC<PhotoManagerDialogProps> = ({ open, onClose }) => {
-  const { schema, setSchema, setSelectedWidgetId } = useLegoDesignerStore();
+  const { schema, pageActiveIndex, setSchema, setSelectedWidgetId } = useLegoDesignerStore(useShallow((state) => ({
+    schema: state.schema,
+    pageActiveIndex: state.pageActiveIndex,
+    setSchema: state.setSchema,
+    setSelectedWidgetId: state.setSelectedWidgetId,
+  })));
   const { userInput, setUserInput, templateOptions } = useResumeStore();
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   // Find existing avatar on canvas if any
-  const existingAvatar = schema.componentsTree[0]?.children.find(
-    (w) => w.componentName.startsWith('hj-avatar') || w.id.includes('avatar') || (w.title || '').includes('头像') || (w.title || '').includes('照片')
-  );
+  const avatarLocation = findAvatarLocation(schema);
+  const avatarPageIndex = avatarLocation?.pageIndex ??
+    (schema.componentsTree[pageActiveIndex] ? pageActiveIndex : 0);
+  const existingAvatar = avatarLocation
+    ? schema.componentsTree[avatarLocation.pageIndex].children[avatarLocation.widgetIndex]
+    : undefined;
 
   const initialAvatarSrc =
     (existingAvatar?.dataSource?.avatarSrc as string) ||
@@ -62,9 +72,7 @@ export const PhotoManagerDialog: React.FC<PhotoManagerDialogProps> = ({ open, on
   useEffect(() => {
     if (open) {
       setPositionChangedByUser(false);
-      const currentAvatar = schema.componentsTree[0]?.children.find(
-        (w) => w.componentName.startsWith('hj-avatar') || w.id.includes('avatar') || (w.title || '').includes('头像') || (w.title || '').includes('照片')
-      );
+      const currentAvatar = existingAvatar;
 
       const src =
         (currentAvatar?.dataSource?.avatarSrc as string) ||
@@ -95,7 +103,7 @@ export const PhotoManagerDialog: React.FC<PhotoManagerDialogProps> = ({ open, on
 
         // Detect current position of the existing avatar
         const currentLeft = Number(currentAvatar.css.left) || 0;
-        const hasSidebar = schema.componentsTree[0]?.children.some(
+        const hasSidebar = schema.componentsTree[avatarPageIndex]?.children.some(
           (w) => (w.id || '').includes('sidebar') || (w.title || '').includes('边栏')
         );
         if (hasSidebar && currentLeft < 260) {
@@ -107,7 +115,7 @@ export const PhotoManagerDialog: React.FC<PhotoManagerDialogProps> = ({ open, on
         }
       } else {
         // Detect sidebar layout
-        const hasSidebar = schema.componentsTree[0]?.children.some((w) => (w.id || '').includes('sidebar'));
+        const hasSidebar = schema.componentsTree[avatarPageIndex]?.children.some((w) => (w.id || '').includes('sidebar'));
         if (hasSidebar) {
           setPosition('sidebar');
           setShape('rounded');
@@ -116,7 +124,7 @@ export const PhotoManagerDialog: React.FC<PhotoManagerDialogProps> = ({ open, on
         }
       }
     }
-  }, [open, schema, userInput.avatarUrl]);
+  }, [open, schema, avatarPageIndex, existingAvatar, userInput.avatarUrl]);
 
   if (!open) return null;
 
@@ -202,7 +210,7 @@ export const PhotoManagerDialog: React.FC<PhotoManagerDialogProps> = ({ open, on
 
     const { componentName, borderRadius } = getComponentStyles();
     const newSchema = JSON.parse(JSON.stringify(schema));
-    const page = newSchema.componentsTree[0];
+    const page = newSchema.componentsTree[avatarPageIndex];
     const themeColor = (newSchema.css as Record<string, unknown>)?.themeColor as string || templateOptions.themeColor || '#1e3a8a';
     const pageWidth = Number(newSchema.css?.width) || 820;
 
@@ -235,9 +243,7 @@ export const PhotoManagerDialog: React.FC<PhotoManagerDialogProps> = ({ open, on
     }
 
     // Find existing avatar
-    const existingIndex = page.children.findIndex(
-      (w: IWidget) => w.componentName.startsWith('hj-avatar') || w.id.includes('avatar') || (w.title || '').includes('头像') || (w.title || '').includes('照片')
-    );
+    const existingIndex = page.children.findIndex(isAvatarWidget);
 
     let targetId = '';
 
@@ -344,11 +350,10 @@ export const PhotoManagerDialog: React.FC<PhotoManagerDialogProps> = ({ open, on
   // Remove avatar from canvas
   const handleRemoveFromCanvas = () => {
     if (confirm('确定要从当前画布上移除个人头像照片吗？')) {
+      if (!avatarLocation || !existingAvatar) return;
       const newSchema = JSON.parse(JSON.stringify(schema));
-      const page = newSchema.componentsTree[0];
-      page.children = page.children.filter(
-        (w: IWidget) => !(w.componentName.startsWith('hj-avatar') || w.id.includes('avatar') || (w.title || '').includes('头像') || (w.title || '').includes('照片'))
-      );
+      const page = newSchema.componentsTree[avatarLocation.pageIndex];
+      page.children = page.children.filter((widget: IWidget) => widget.id !== existingAvatar.id);
       setSchema(newSchema, true);
       setAvatarSrc('');
       setUserInput({ avatarUrl: '' });

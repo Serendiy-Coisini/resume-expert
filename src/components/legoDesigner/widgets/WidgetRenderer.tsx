@@ -25,7 +25,7 @@ interface WidgetRendererProps {
   widget: IWidget;
 }
 
-export const WidgetRenderer: React.FC<WidgetRendererProps> = ({ widget }) => {
+export const WidgetRenderer = React.memo(function WidgetRenderer({ widget }: WidgetRendererProps) {
   const { componentName, css, dataSource } = widget;
   const avatarSrc = safeLegoImageSource(dataSource.avatarSrc || dataSource.src);
 
@@ -358,4 +358,4 @@ export const WidgetRenderer: React.FC<WidgetRendererProps> = ({ widget }) => {
       {dataSource.text ? renderFormattedText(dataSource.text as string) : '未识别的组件'}
     </div>
   );
-};
+});

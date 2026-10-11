@@ -3,6 +3,7 @@ import { test } from 'node:test';
 import { calculatePrintSlices } from '@/components/legoDesigner/utils/printLego';
 import { applyMeasuredTextHeights } from '@/lib/lego-text-layout';
 import { appendBlankPage, canAppendBlankPage, moveWidgetsToCanvasPage } from '@/lib/lego-pages';
+import { findAvatarLocation, getNextWidgetY, shouldInitializeCanvas } from '@/lib/lego-editor-selectors';
 import { approveExternalLegoImageSource, safeLegoImageSource, validateLocalLegoImage } from '@/lib/lego-image';
 import { validateAndNormalizeLegoJson } from '@/lib/schema-normalizer';
 import { sanitizePrintHTML } from '@/lib/safe-html';
@@ -208,7 +209,7 @@ test('cross-page drag moves the selected group and automatically creates the las
   assert.deepEqual(initial.componentsTree[0].children.map((item) => item.id), ['first', 'second']);
 });
 
-test('drag-created empty page is removed when its last widget returns, including legacy drafts', () => {
+test('drag-created empty page is removed when its last widget returns', () => {
   const initial = canvas([widget('round-trip', 20, 40, 40)]);
   const forward = moveWidgetsToCanvasPage(initial, ['round-trip'], 1, 'round-trip',
     { left: 70, top: 80 }, { 'round-trip': { left: 20, top: 40 } });
@@ -219,11 +220,47 @@ test('drag-created empty page is removed when its last widget returns, including
   assert.deepEqual(back.componentsTree[0].children.map((item) => item.id), ['round-trip']);
   assert.equal(forward.componentsTree.length, 2);
 
-  const legacy = structuredClone(forward);
-  delete legacy.componentsTree[1].retainWhenEmpty;
-  const legacyBack = moveWidgetsToCanvasPage(legacy, ['round-trip'], 0, 'round-trip',
-    { left: 20, top: 40 }, { 'round-trip': { left: 70, top: 80 } });
-  assert.equal(legacyBack.componentsTree.length, 1);
+});
+
+test('legacy pages without an origin marker remain when their last widget moves away', () => {
+  const initial = canvas([], 2);
+  initial.componentsTree[1].children = [widget('legacy-widget', 70, 80, 40)];
+  const normalized = validateAndNormalizeLegoJson(initial);
+  assert.equal(normalized.success, true);
+  assert.equal(normalized.data?.componentsTree[1].retainWhenEmpty, true);
+  const back = moveWidgetsToCanvasPage(initial, ['legacy-widget'], 0, 'legacy-widget',
+    { left: 20, top: 40 }, { 'legacy-widget': { left: 70, top: 80 } });
+  assert.equal(back.componentsTree.length, 2);
+  assert.deepEqual(back.componentsTree[1].children, []);
+});
+
+test('editor initialization preserves widgets on later pages and intentionally empty canvases', () => {
+  assert.equal(shouldInitializeCanvas(canvas([]), null), true);
+  assert.equal(shouldInitializeCanvas(canvas([]), 'already-initialized'), false);
+  const multiPage = canvas([], 2);
+  multiPage.componentsTree[1].children = [widget('page-two', 20, 40, 40)];
+  assert.equal(shouldInitializeCanvas(multiPage, null), false);
+});
+
+test('new modules use the active page bottom and avatar lookup finds later pages', () => {
+  const multiPage = canvas([widget('page-one', 20, 900, 40)], 2);
+  multiPage.componentsTree[1].children = [widget('page-two', 20, 100, 50), widget('avatar-two', 40, 20, 40, 'hj-avatar-1')];
+  assert.equal(getNextWidgetY(multiPage, 1), 174);
+  assert.deepEqual(findAvatarLocation(multiPage), { pageIndex: 1, widgetIndex: 1 });
+});
+
+test('unchanged drag coordinates do not publish a new canvas schema', () => {
+  const snapshot = useLegoDesignerStore.getState();
+  try {
+    snapshot.setSchema(canvas([widget('still', 20, 40, 40)]), false);
+    const before = useLegoDesignerStore.getState().schema;
+    snapshot.updateWidgetCss('still', { left: 20, top: 40 }, false);
+    assert.strictEqual(useLegoDesignerStore.getState().schema, before);
+    snapshot.batchMoveWidgets(['still'], 0, 0, { still: { left: 20, top: 40 } }, false);
+    assert.strictEqual(useLegoDesignerStore.getState().schema, before);
+  } finally {
+    useLegoDesignerStore.setState(snapshot, true);
+  }
 });
 
 test('manually added blank pages remain after their last widget moves away', () => {

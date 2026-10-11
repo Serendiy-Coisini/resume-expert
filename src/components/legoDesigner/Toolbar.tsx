@@ -1,4 +1,5 @@
 import React, { useRef, useState, useEffect, useCallback } from 'react';
+import dynamic from 'next/dynamic';
 import { useShallow } from 'zustand/react/shallow';
 import { useLegoDesignerStore } from '@/store/lego-designer-store';
 import { useResumeStore } from '@/store/resume-store';
@@ -6,9 +7,6 @@ import { buildLegoSchemaFromResume, fillAiDataIntoExistingSchema, reflowCanvasWi
 import { validateAndNormalizeLegoJson } from '@/lib/schema-normalizer';
 import { printLegoCanvas } from './utils/printLego';
 import { exportResumeAsWord } from '@/lib/utils';
-import { SaveTemplateDialog } from './SaveTemplateDialog';
-import { ImportResumeDialog } from './ImportResumeDialog';
-import { PhotoManagerDialog } from './PhotoManagerDialog';
 import { saveLegoDraft, loadLegoDraft } from '@/lib/lego-draft';
 import { applyThemeColorToSchema, THEME_COLOR_PRESETS, hslToHex, hexToHsl } from '@/lib/theme-utils';
 import { canAppendBlankPage } from '@/lib/lego-pages';
@@ -39,6 +37,10 @@ import {
   BookmarkPlus,
   FilePlus2
 } from 'lucide-react';
+
+const SaveTemplateDialog = dynamic(() => import('./SaveTemplateDialog').then((module) => module.SaveTemplateDialog), { ssr: false });
+const ImportResumeDialog = dynamic(() => import('./ImportResumeDialog').then((module) => module.ImportResumeDialog), { ssr: false });
+const PhotoManagerDialog = dynamic(() => import('./PhotoManagerDialog').then((module) => module.PhotoManagerDialog), { ssr: false });
 
 interface ToolbarProps {
   isFullScreen: boolean;

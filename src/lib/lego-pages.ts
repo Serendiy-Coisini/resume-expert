@@ -94,7 +94,7 @@ export function moveWidgetsToCanvasPage(
       : index === targetIndex
         ? { ...page, height: destinationHeight, children: [...page.children, ...moved] }
         : page);
-  const removeEmptySource = sourceIndex > 0 && !source.retainWhenEmpty &&
+  const removeEmptySource = sourceIndex > 0 && source.retainWhenEmpty === false &&
     pages[sourceIndex].children.length === 0 && pages.length > 1;
   const result: IHJSchema = {
     ...withTarget,

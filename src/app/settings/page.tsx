@@ -80,6 +80,8 @@ export default function SettingsPage() {
     config: storedConfig,
     setConfig: setStoredConfig,
     resetConfig: resetStoredConfig,
+    rememberCredentials,
+    setRememberCredentials,
   } = useAIConfigStore();
 
   const [selectedProvider, setSelectedProvider] = useState<string | null>("deepseek");
@@ -163,7 +165,7 @@ export default function SettingsPage() {
       const model = selectedProvider === "custom" ? customModel : provider?.model;
       const providerType = provider?.provider || "openai";
 
-      // 1. Save directly into browser localStorage (persisted across sessions)
+      // Persist non-sensitive model settings; credentials follow the user's storage choice.
       setStoredConfig({
         apiKey: apiKey.trim(),
         baseUrl: baseUrl || "",
@@ -217,6 +219,14 @@ export default function SettingsPage() {
         </div>
 
         {/* Step 1: Select Provider */}
+        <label className="mb-6 flex items-start gap-3 rounded-xl border border-slate-700 bg-slate-900/50 p-4 text-sm text-slate-200">
+          <input type="checkbox" checked={rememberCredentials}
+            onChange={(event) => setRememberCredentials(event.target.checked)}
+            className="mt-0.5 h-4 w-4 accent-blue-500" />
+          <span><strong>在此浏览器记住密钥与服务口令</strong><br />
+            关闭后仅在本次页面会话中使用，刷新后需要重新输入。浏览器本地存储中的密钥可被本机用户及同源脚本读取；共用设备建议关闭。
+          </span>
+        </label>
         <details className="mb-8 rounded-xl border border-slate-700 p-4 text-slate-200">
           <summary className="cursor-pointer font-semibold">使用部署方的共享模型</summary>
           <p className="my-3 text-sm text-slate-400">请向管理员获取个人服务访问口令。保存后使用服务器模型，并清空当前个人 API Key。</p>
@@ -224,7 +234,7 @@ export default function SettingsPage() {
           <Button className="mt-3" disabled={serverAccessToken.trim().length < 32} onClick={() => {
             setStoredConfig({ apiKey: "", serverAccessToken: serverAccessToken.trim() });
             setApiKey("");
-            setTestResult({ success: !isStorageVolatile("resume_expert_user_ai_config"), message: isStorageVolatile("resume_expert_user_ai_config") ? "口令仅本次会话有效，未能写入浏览器存储。" : "共享模型口令已保存，返回分析页面即可使用。" });
+            setTestResult({ success: !isStorageVolatile("resume_expert_user_ai_config"), message: isStorageVolatile("resume_expert_user_ai_config") ? "浏览器存储写入失败，口令仅本次会话有效。" : rememberCredentials ? "共享模型口令已保存在此浏览器，返回分析页面即可使用。" : "共享模型口令仅本次页面会话有效，返回分析页面即可使用。" });
           }}>保存服务访问口令</Button>
         </details>
         <div className="mb-10">
@@ -398,7 +408,7 @@ export default function SettingsPage() {
             {saved && (
               <div className="mt-6 p-5 rounded-xl bg-blue-950/50 border border-blue-500/30 text-center">
                 <p className="text-blue-300 font-bold text-lg">🎉 配置已成功保存至当前浏览器！</p>
-                <p className="text-slate-300 text-sm mt-1">你的配置已安全保存在本地存储中，下次访问无需重复配置，即可直接调用 AI 分析</p>
+                <p className="text-slate-300 text-sm mt-1">{rememberCredentials ? '配置已保存在此浏览器本地，下次访问可继续使用。' : '配置仅在本次页面会话有效，刷新后需要重新输入密钥。'}</p>
                 <Link href="/expert" className="inline-block mt-4">
                   <Button className="bg-blue-600 hover:bg-blue-500 text-white font-bold h-11 px-8 gap-2">
                     <Sparkles className="w-4 h-4" /> 立即开始分析重构简历
@@ -423,7 +433,7 @@ export default function SettingsPage() {
             </div>
             <div className="p-4 rounded-xl bg-slate-900/50 border border-slate-800">
               <div className="font-bold text-slate-200">Q: 我的 API Key 安全吗？会泄露给第三方吗？</div>
-              <div className="text-slate-300 mt-1">A: 完全安全。API Key 仅保存在你自己电脑本地浏览器存储或私有配置文件（.env.local）中，绝不会被上传、共享或出售给任何第三方服务器。</div>
+              <div className="text-slate-300 mt-1">A: 个人 API Key 会通过本应用的服务端代理转发给所选模型服务商。勾选“在此浏览器记住密钥”时，它也会保存在浏览器本地存储中；共用设备可关闭此选项，让密钥仅在当前页面会话中使用。请勿在不信任的设备上输入密钥。</div>
             </div>
             <div className="p-4 rounded-xl bg-slate-900/50 border border-slate-800">
               <div className="font-bold text-slate-200">Q: 推荐使用哪个 AI 大模型服务商？</div>

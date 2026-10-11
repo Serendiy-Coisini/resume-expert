@@ -1,9 +1,9 @@
 import React, { useState, useMemo, useEffect } from 'react';
+import dynamic from 'next/dynamic';
 import { WIDGET_CONFIG_LIST } from './schema/widgetConfig';
 import { useLegoDesignerStore } from '@/store/lego-designer-store';
 import { useResumeStore } from '@/store/resume-store';
 import { RESUME_MODEL_DATA } from '@/lib/resume-model-data';
-import { SaveTemplateDialog } from './SaveTemplateDialog';
 import { approveExternalLegoImageSource, isExternalLegoImageSource, safeLegoImageSource } from '@/lib/lego-image';
 import {
   LayoutGrid,
@@ -30,6 +30,10 @@ import {
   X as XIcon
 } from 'lucide-react';
 import type { IWidget } from '@/types/lego';
+import { getNextWidgetY } from '@/lib/lego-editor-selectors';
+import { useShallow } from 'zustand/react/shallow';
+
+const SaveTemplateDialog = dynamic(() => import('./SaveTemplateDialog').then((module) => module.SaveTemplateDialog), { ssr: false });
 
 interface LeftComListProps {
   width: number;
@@ -50,6 +54,7 @@ export const LeftComList: React.FC<LeftComListProps> = ({
   const [activeTab, setActiveTab] = useState<'widgets' | 'modules' | 'layers' | 'json' | 'templates'>('widgets');
   const {
     schema,
+    pageActiveIndex,
     selectedWidgetId,
     addWidget,
     addWidgets,
@@ -60,7 +65,20 @@ export const LeftComList: React.FC<LeftComListProps> = ({
     loadSavedTemplate,
     deleteSavedTemplate,
     loadSavedTemplates
-  } = useLegoDesignerStore();
+  } = useLegoDesignerStore(useShallow((state) => ({
+    schema: state.schema,
+    pageActiveIndex: state.pageActiveIndex,
+    selectedWidgetId: state.selectedWidgetId,
+    addWidget: state.addWidget,
+    addWidgets: state.addWidgets,
+    setSelectedWidgetId: state.setSelectedWidgetId,
+    deleteWidget: state.deleteWidget,
+    moveWidgetLayer: state.moveWidgetLayer,
+    savedTemplates: state.savedTemplates,
+    loadSavedTemplate: state.loadSavedTemplate,
+    deleteSavedTemplate: state.deleteSavedTemplate,
+    loadSavedTemplates: state.loadSavedTemplates,
+  })));
   const userInput = useResumeStore((s) => s.userInput);
 
   useEffect(() => {
@@ -77,20 +95,7 @@ export const LeftComList: React.FC<LeftComListProps> = ({
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const getCanvasNextY = () => {
-    const children = schema.componentsTree[0]?.children || [];
-    if (children.length === 0) return 40;
-    let maxY = 40;
-    children.forEach((w) => {
-      const top = Number(w.css.top) || 0;
-      const height = Number(w.css.height) || 40;
-      const bottom = top + height;
-      if (bottom > maxY) {
-        maxY = bottom;
-      }
-    });
-    return maxY + 24;
-  };
+  const getCanvasNextY = () => getNextWidgetY(schema, pageActiveIndex);
 
   // Helper to add structured resume modules
   const handleAddModule = (moduleKey: string) => {
@@ -633,10 +638,10 @@ export const LeftComList: React.FC<LeftComListProps> = ({
         {activeTab === 'layers' && (
           <div className="space-y-1">
             <p className="text-xs text-slate-500 mb-2 px-1">当前页面包含的积木图层（上层在前）：</p>
-            {schema.componentsTree[0]?.children.length === 0 ? (
+            {schema.componentsTree[pageActiveIndex]?.children.length === 0 ? (
               <div className="text-xs text-slate-400 text-center py-8">画布上暂无积木组件</div>
             ) : (
-              [...(schema.componentsTree[0]?.children || [])].reverse().map((widget: IWidget) => {
+              [...(schema.componentsTree[pageActiveIndex]?.children || [])].reverse().map((widget: IWidget) => {
                 const isSelected = selectedWidgetId === widget.id;
                 return (
                   <div
